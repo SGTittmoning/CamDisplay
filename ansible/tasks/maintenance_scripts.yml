@@ -1,8 +1,7 @@
 ---
 # Manuelle Wartungsskripte fuer den Fall, dass gerade kein Ansible-Zugriff
-# moeglich ist (z.B. vor Ort ohne Laptop/VPN). Angepasst aus dem Schwester-
-# projekt FFW-Tittmoning/ffw-usv-nut-proxmox (pi/usv-pi-update.sh,
-# pi/usv-pi-writable.sh), das denselben raspi-config-Overlay-Mechanismus nutzt.
+# moeglich ist (z.B. vor Ort ohne Laptop/VPN). Der raspi-config-Overlay/
+# Bootro-Mechanismus, den sie nutzen, ist derselbe wie in tasks/overlay.yml.
 
 - name: /root/bin anlegen
   file:

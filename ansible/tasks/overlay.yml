@@ -1,10 +1,9 @@
 ---
 # Read-only Root-Filesystem + read-only Boot-Partition ueber das eingebaute
-# raspi-config Overlay/Bootro (nicht das benutzerdefinierte OverlayFS-
-# Verfahren, das wir auf dem alten camDisplayPistole vorgefunden haben -
-# hier bewusst der offiziell unterstuetzte, dokumentierte Weg). Schuetzt vor
-# Datenverlust/Korruption durch harte Stromabschaltung ohne sauberes
-# Herunterfahren.
+# raspi-config Overlay/Bootro (nicht ein selbstgebautes OverlayFS-Verfahren,
+# wie es auf manchen alten Systemen zu finden ist - hier bewusst der
+# offiziell unterstuetzte, dokumentierte Weg). Schuetzt vor Datenverlust/
+# Korruption durch harte Stromabschaltung ohne sauberes Herunterfahren.
 #
 # WICHTIGE REIHENFOLGE: raspi-configs enable_bootro() verweigert die Arbeit,
 # wenn das Overlay bereits aktiv ist ("Overlay in use; cannot update fstab") -
@@ -25,8 +24,8 @@
 # aktuellen Boot in der Kernel-Cmdline stand (siehe Kommentar unten) -
 # fuer die Entscheidung "muss ich enable_overlayfs aufrufen" ist deshalb
 # stattdessen der overlayroot-Paketstatus das verlaesslichere Signal
-# (verifiziert 2026-08-21 auf camDisplayPistole1: Flag stand bereits im
-# Image, Paket fehlte, get_overlay_now meldete faelschlich "aktiv").
+# (beobachtet: Flag stand bereits im Image, Paket fehlte, get_overlay_now
+# meldete faelschlich "aktiv").
 
 - name: overlayroot Paketstatus ermitteln
   command: dpkg-query -W -f='${Status}' overlayroot

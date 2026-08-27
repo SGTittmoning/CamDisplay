@@ -84,5 +84,5 @@ Note that `camdisplay.service` itself picks its output connector the same way, b
 ## Notes
 
 - `stream_url` holds camera credentials — keep `inventory.yml` out of version control (already gitignored).
-- The maintenance scripts (`camdisplay-update.sh`, `camdisplay-writable.sh`) are adapted from a sister project's UPS/NUT Pi tooling, which solved the same overlay/bootro reboot dance first.
+- The maintenance scripts (`camdisplay-update.sh`, `camdisplay-writable.sh`) implement the overlay/bootro reboot dance described above; `tasks/overlay.yml` covers the same mechanism during install.
 - Task ordering in `install.yml` matters: anything that can trigger a reboot runs *before* `kiosk_service.yml` starts the service, so it never starts into a stale environment and runs into the reboot-guard's failure counter needlessly.

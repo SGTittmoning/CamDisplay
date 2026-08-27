@@ -18,8 +18,6 @@
 #                                      bereinigen, Boot-RO + OverlayFS wieder
 #                                      aktivieren -> danach nochmal manuell
 #                                      rebooten
-#
-# Angepasst aus usv-pi-update.sh (FFW-Tittmoning/ffw-usv-nut-proxmox).
 
 set -euo pipefail
 

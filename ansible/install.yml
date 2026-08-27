@@ -39,8 +39,8 @@
     # bereits aktiv, landen diese Schreibvorgaenge NUR im fluechtigen
     # tmpfs-Layer und sind nach dem naechsten Reboot spurlos weg - ohne
     # Fehlermeldung, ohne "changed"-Warnung, einfach still verschwunden.
-    # Genau das ist am 2026-08-22 passiert: camdisplay-screenshot.sh wurde
-    # so "erfolgreich" deployt und war nach dem naechsten Reboot verschwunden.
+    # Ist real so schon passiert: ein Skript wurde so "erfolgreich" deployt
+    # und war nach dem naechsten Reboot spurlos wieder weg.
     - name: Root-Overlay-Status ermitteln (Sicherheitscheck)
       command: raspi-config nonint get_overlay_now
       register: camdisplay_preflight_overlay
@@ -65,7 +65,7 @@
 
     # Reihenfolge wichtig: alles was einen Reboot ausloesen kann MUSS vor
     # kiosk_service.yml laufen, sonst startet der Dienst noch in der alten
-    # Systemumgebung und laeuft ins StartLimitBurst (siehe Testlauf 2026-08-21).
+    # Systemumgebung und laeuft ins StartLimitBurst (beobachtet im Testbetrieb).
 
     - import_tasks: tasks/overlay.yml
       when: camdisplay_enable_overlay | bool

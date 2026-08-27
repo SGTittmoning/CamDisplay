@@ -49,8 +49,7 @@
 #
 # Vorher: evtl. beim Imaging (z.B. Raspberry Pi Imager) versehentlich
 # mitgegebene WLAN-Zugangsdaten entfernen - liegen sonst im Klartext in
-# /etc/netplan/*.yaml (verifiziert 2026-08-21, Passwort einer "IoT"-SSID
-# gefunden und entfernt).
+# /etc/netplan/*.yaml.
 - name: Vorhandene WLAN-Verbindungsprofile ermitteln
   command: nmcli -t -f NAME,TYPE connection show
   register: camdisplay_nm_connections

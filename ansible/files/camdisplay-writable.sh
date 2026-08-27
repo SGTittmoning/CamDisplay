@@ -30,8 +30,6 @@
 #   sudo camdisplay-writable.sh ro       System wieder read-only setzen
 #                                        (OverlayFS + Boot-RO), danach einmal
 #                                        manuell rebooten
-#
-# Angepasst aus usv-pi-writable.sh (FFW-Tittmoning/ffw-usv-nut-proxmox).
 
 set -euo pipefail
 

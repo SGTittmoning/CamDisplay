@@ -5,9 +5,8 @@
 # falsche Konfiguration) soll das System nicht fuer immer neu starten,
 # sondern anhalten und auf manuelle Untersuchung warten.
 #
-# Hintergrund: am 2026-08-21 fehlte auf einem Testsystem libegl1, wodurch
-# ffplay bei jedem Versuch sofort scheiterte - ohne diese Grenze haette
-# der Pi unbegrenzt oft neu gestartet.
+# Beispiel: fehlt libegl1, scheitert ffplay bei jedem Versuch sofort -
+# ohne diese Grenze wuerde der Pi unbegrenzt oft neu starten.
 #
 # Zaehler liegt auf der Boot-Partition (siehe camdisplay-update.sh fuer
 # die Begruendung: uebersteht auch ein aktives Overlay-Root).
