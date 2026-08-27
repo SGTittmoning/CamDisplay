@@ -195,4 +195,4 @@ done
 
 ## License
 
-TODO
+[MIT](LICENSE)
