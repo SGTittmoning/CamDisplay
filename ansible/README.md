@@ -19,9 +19,14 @@ camdisplay:
       ansible_host: 192.0.2.10
       ansible_user: pi
       stream_url: "rtsp://user:pass@camera-host:554/stream"
+      # optional: sets the Pi's hostname, useful if your DHCP server creates
+      # a DNS record from it (e.g. "camdisplay1.your-domain.lan")
+      # camdisplay_hostname: camdisplay1
 ```
 
 `ansible_user` needs passwordless `sudo` on the target.
+
+`camdisplay_hostname` (optional) sets the OS hostname via the `hostname` module and reboots if it changed. It does **not** configure DHCP reservations or DNS itself — that's your router/DHCP server's job, keyed by MAC address — but many setups create a DNS record from the hostname a device reports over DHCP, so this is what makes e.g. `camdisplay1.your-domain.lan` resolve. Chicken-and-egg note: on a completely fresh install, that DNS name won't resolve yet (the Pi hasn't reported its new hostname over DHCP), so use the reserved IP directly for `ansible_host` on the very first run; once the hostname is set and the Pi has rebooted, the DNS name should work for subsequent runs (e.g. `maintain.yml`).
 
 ## Install
 

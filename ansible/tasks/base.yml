@@ -39,6 +39,30 @@
     groups: video,render
     append: yes
 
+# Optional, ueber die Inventory-Variable camdisplay_hostname gesteuert (fuer
+# das Testgeraet i.d.R. nicht gesetzt). Wichtig fuer Netze, in denen der
+# DHCP-Server per Hostname automatisch einen DNS-Eintrag anlegt (z.B.
+# "camDisplayPistole.sg.lan") - eine DHCP-Reservierung allein (typischerweise
+# MAC-basiert) sorgt nur fuer eine feste IP, nicht fuer die DNS-Aufloesung.
+- name: Hostname setzen
+  hostname:
+    name: "{{ camdisplay_hostname }}"
+  register: camdisplay_hostname_set
+  when: camdisplay_hostname is defined
+
+- name: /etc/hosts (127.0.1.1-Eintrag) an neuen Hostnamen anpassen
+  lineinfile:
+    path: /etc/hosts
+    regexp: '^127\.0\.1\.1\s'
+    line: "127.0.1.1\t{{ camdisplay_hostname }}"
+    state: present
+  when: camdisplay_hostname is defined
+
+- name: Reboot fuer Hostname-Aenderung (neue DHCP-Anmeldung mit korrektem Hostnamen)
+  reboot:
+    msg: "Reboot nach Hostname-Aenderung"
+  when: camdisplay_hostname_set is changed
+
 - name: Zeitzone setzen
   timezone:
     name: "{{ camdisplay_timezone }}"
