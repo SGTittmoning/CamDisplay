@@ -1,0 +1,20 @@
+[Unit]
+Description=CamDisplay - fullscreen camera stream
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=600
+StartLimitBurst=6
+OnFailure=camdisplay-reboot.service
+
+[Service]
+Type=simple
+User={{ ansible_user }}
+SupplementaryGroups=video render
+Environment=SDL_VIDEODRIVER=kmsdrm
+EnvironmentFile=/etc/camdisplay/stream.env
+ExecStart=/usr/bin/ffplay -fs -analyzeduration 1 -fflags -nobuffer -an -nostats -loglevel error "${STREAM_URL}"
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

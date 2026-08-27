@@ -1,0 +1,27 @@
+---
+# Manuelle Wartungsskripte fuer den Fall, dass gerade kein Ansible-Zugriff
+# moeglich ist (z.B. vor Ort ohne Laptop/VPN). Angepasst aus dem Schwester-
+# projekt FFW-Tittmoning/ffw-usv-nut-proxmox (pi/usv-pi-update.sh,
+# pi/usv-pi-writable.sh), das denselben raspi-config-Overlay-Mechanismus nutzt.
+
+- name: /root/bin anlegen
+  file:
+    path: /root/bin
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+
+- name: Wartungsskripte nach /root/bin kopieren
+  copy:
+    src: "{{ item }}"
+    dest: "/root/bin/{{ item }}"
+    owner: root
+    group: root
+    mode: '0700'
+  loop:
+    - camdisplay-update.sh
+    - camdisplay-writable.sh
+    - camdisplay-reboot-guard.sh
+    - camdisplay-reboot-count-reset.sh
+    - camdisplay-screenshot.sh

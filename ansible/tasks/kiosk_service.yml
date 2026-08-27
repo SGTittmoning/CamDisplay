@@ -1,0 +1,44 @@
+---
+- name: /etc/camdisplay anlegen
+  file:
+    path: /etc/camdisplay
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: stream.env schreiben (enthaelt die Stream-URL/Zugangsdaten)
+  template:
+    src: stream.env.j2
+    dest: /etc/camdisplay/stream.env
+    owner: root
+    group: root
+    mode: '0600'
+
+- name: systemd units kopieren
+  template:
+    src: "{{ item }}.j2"
+    dest: "/etc/systemd/system/{{ item }}"
+    owner: root
+    group: root
+    mode: '0644'
+  loop:
+    - camdisplay.service
+    - camdisplay-reboot.service
+    - camdisplay-reboot-count-reset.service
+    - camdisplay-reboot-count-reset.timer
+  notify: daemon-reload
+
+- meta: flush_handlers
+
+- name: camdisplay-reboot-count-reset.timer aktivieren und starten
+  systemd:
+    name: camdisplay-reboot-count-reset.timer
+    enabled: yes
+    state: started
+
+- name: camdisplay.service aktivieren und starten
+  systemd:
+    name: camdisplay.service
+    enabled: yes
+    state: started

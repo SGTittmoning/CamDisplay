@@ -1,0 +1,9 @@
+[Unit]
+Description=5 minutes after boot, check CamDisplay is stable and reset the reboot counter
+
+[Timer]
+OnBootSec=5min
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target

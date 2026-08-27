@@ -1,0 +1,9 @@
+[Unit]
+Description=5 Minuten nach Boot pruefen ob CamDisplay stabil laeuft, Reboot-Zaehler zuruecksetzen
+
+[Timer]
+OnBootSec=5min
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target

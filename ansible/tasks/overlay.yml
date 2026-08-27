@@ -1,0 +1,55 @@
+---
+# Read-only Root-Filesystem + read-only Boot-Partition ueber das eingebaute
+# raspi-config Overlay/Bootro (nicht das benutzerdefinierte OverlayFS-
+# Verfahren, das wir auf dem alten camDisplayPistole vorgefunden haben -
+# hier bewusst der offiziell unterstuetzte, dokumentierte Weg). Schuetzt vor
+# Datenverlust/Korruption durch harte Stromabschaltung ohne sauberes
+# Herunterfahren.
+#
+# WICHTIGE REIHENFOLGE: raspi-configs enable_bootro() verweigert die Arbeit,
+# wenn das Overlay bereits aktiv ist ("Overlay in use; cannot update fstab") -
+# /etc/fstab liegt auf dem Root-FS, eine Aenderung waere bei aktivem Overlay
+# nur im fluechtigen tmpfs-Layer sichtbar und nach dem Reboot wieder weg.
+# Deshalb hier zuerst bootro, danach erst overlay aktivieren - genau wie es
+# camdisplay-update.sh beim Wiederherstellen des ro-Zustands macht (erst
+# enable_bootro, dann enable_overlayfs). Ein gemeinsamer Reboot am Ende
+# aktiviert beides zusammen.
+#
+# Ist das Overlay auf einem Host schon aktiv und bootro soll nachtraeglich
+# ergaenzt werden, schlaegt dieser Task hier fehl (siehe oben) - in dem Fall
+# stattdessen einmal manuell "camdisplay-writable.sh rw" (+ Reboot), dann
+# "camdisplay-writable.sh ro" (+ Reboot) auf dem Host ausfuehren.
+#
+# get_overlay_now/get_bootro_now: 0 = aktiv, 1 = nicht aktiv (raspi-config
+# Konvention). get_overlay_now prueft nur, ob "overlayroot=tmpfs" beim
+# aktuellen Boot in der Kernel-Cmdline stand (siehe Kommentar unten) -
+# fuer die Entscheidung "muss ich enable_overlayfs aufrufen" ist deshalb
+# stattdessen der overlayroot-Paketstatus das verlaesslichere Signal
+# (verifiziert 2026-08-21 auf camDisplayPistole1: Flag stand bereits im
+# Image, Paket fehlte, get_overlay_now meldete faelschlich "aktiv").
+
+- name: overlayroot Paketstatus ermitteln
+  command: dpkg-query -W -f='${Status}' overlayroot
+  register: camdisplay_overlayroot_pkg
+  changed_when: false
+  failed_when: false
+
+- name: Bootro-Status ermitteln
+  command: raspi-config nonint get_bootro_now
+  register: camdisplay_bootro_status
+  changed_when: false
+
+- name: Boot-Partition read-only setzen (nur moeglich solange Overlay noch inaktiv ist)
+  command: raspi-config nonint enable_bootro
+  when: camdisplay_bootro_status.stdout | trim != '0'
+  register: camdisplay_bootro_enabled
+
+- name: Overlay-Root aktivieren (installiert bei Bedarf das overlayroot-Paket)
+  command: raspi-config nonint enable_overlayfs
+  when: "'install ok installed' not in camdisplay_overlayroot_pkg.stdout"
+  register: camdisplay_overlay_enabled
+
+- name: Reboot fuer Bootro/Overlay-Aktivierung
+  reboot:
+    msg: "Reboot nach Aktivierung von Bootro/Overlay-Root"
+  when: camdisplay_bootro_enabled is changed or camdisplay_overlay_enabled is changed

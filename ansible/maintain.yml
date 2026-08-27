@@ -1,0 +1,61 @@
+---
+# Wartung/Updates. Nutzt das auf dem Pi installierte camdisplay-update.sh
+# (siehe tasks/maintenance_scripts.yml), da ein einfaches "apt upgrade"
+# bei aktivem OverlayFS wirkungslos waere - jede Aenderung am Root-FS landet
+# sonst nur im fluechtigen tmpfs-Layer und ist nach dem naechsten Reboot
+# wieder weg. Das Skript uebernimmt den noetigen zweiphasigen Reboot-Tanz
+# (Overlay/Boot-RO deaktivieren -> Updates -> wieder aktivieren -> Reboot).
+#
+# Aufruf:
+#   ansible-playbook -i inventory.yml maintain.yml --limit <host>
+
+- hosts: camdisplay
+  become: yes
+
+  tasks:
+
+    - name: camdisplay-update.sh vorhanden?
+      stat:
+        path: /root/bin/camdisplay-update.sh
+      register: camdisplay_update_script
+
+    - name: Fehler falls Skript fehlt
+      fail:
+        msg: "/root/bin/camdisplay-update.sh fehlt - zuerst install.yml (tasks/maintenance_scripts.yml) ausfuehren"
+      when: not camdisplay_update_script.stat.exists
+
+    - name: "Phase 1: Update-Zyklus starten (begin)"
+      command: /root/bin/camdisplay-update.sh begin
+
+    - name: Zwischenstatus auslesen
+      command: /root/bin/camdisplay-update.sh status
+      register: camdisplay_status_after_begin
+      changed_when: false
+
+    - name: Zwischen-Reboot falls noetig
+      reboot:
+        msg: "Reboot fuer camdisplay-update.sh Phase 1 (OverlayFS deaktivieren)"
+      when: "'awaiting-reboot-1' in camdisplay_status_after_begin.stdout"
+
+    - name: "Phase 2: Updates einspielen (apply)"
+      command: /root/bin/camdisplay-update.sh apply
+      register: camdisplay_apply_result
+
+    - name: Ergebnis von apply anzeigen
+      debug:
+        var: camdisplay_apply_result.stdout_lines
+
+    - name: Finaler Reboot (OverlayFS/Boot-RO wieder aktivieren)
+      reboot:
+        msg: "Finaler Reboot nach Update - OverlayFS/Boot-RO wieder aktiv"
+
+    - name: camdisplay.service laeuft wieder?
+      command: systemctl is-active camdisplay.service
+      register: camdisplay_service_status
+      changed_when: false
+      failed_when: false
+
+    - name: Warnung falls camdisplay.service nach dem Update nicht aktiv ist
+      debug:
+        msg: "WARNUNG: camdisplay.service ist nach dem Update nicht aktiv (Status: {{ camdisplay_service_status.stdout }})"
+      when: camdisplay_service_status.stdout != 'active'

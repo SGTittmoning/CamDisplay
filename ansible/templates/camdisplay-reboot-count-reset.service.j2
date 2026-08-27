@@ -1,0 +1,6 @@
+[Unit]
+Description=Reboot-Zaehler fuer CamDisplay zuruecksetzen (nach stabiler Laufzeit)
+
+[Service]
+Type=oneshot
+ExecStart=/root/bin/camdisplay-reboot-count-reset.sh

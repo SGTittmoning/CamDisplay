@@ -1,0 +1,74 @@
+---
+- name: apt-Cache aktualisieren (max. 1x pro Stunde)
+  apt:
+    update_cache: yes
+    cache_valid_time: 3600
+  changed_when: false
+
+- name: ffmpeg installieren (liefert ffplay)
+  apt:
+    name: ffmpeg
+    state: present
+
+- name: libegl1/libegl-mesa0 installieren (fuer kmsdrm/EGL, wird von ffmpeg nicht automatisch mitgezogen)
+  apt:
+    name:
+      - libegl1
+      - libegl-mesa0
+    state: present
+
+# kmsgrab (headless Screenshot fuer Tests, siehe camdisplay-screenshot.sh)
+# ist Teil des ffmpeg-Pakets selbst - kein eigenes Paket noetig. Hier nur
+# verifizieren, dass der aktuell installierte ffmpeg-Build es tatsaechlich
+# mitbringt, damit ein fehlendes Feature sofort beim Deploy auffaellt statt
+# erst beim naechsten Testversuch.
+- name: kmsgrab-Unterstuetzung in ffmpeg pruefen
+  command: ffmpeg -devices
+  register: camdisplay_ffmpeg_devices
+  changed_when: false
+
+- name: Fehler falls kmsgrab fehlt
+  assert:
+    that:
+      - "'kmsgrab' in camdisplay_ffmpeg_devices.stdout"
+    fail_msg: "Dieser ffmpeg-Build unterstuetzt kmsgrab nicht - headless Screenshots (camdisplay-screenshot.sh) funktionieren so nicht."
+
+- name: "{{ ansible_user }} in video/render Gruppen (KMS/DRM Zugriff)"
+  user:
+    name: "{{ ansible_user }}"
+    groups: video,render
+    append: yes
+
+- name: Zeitzone setzen
+  timezone:
+    name: "{{ camdisplay_timezone }}"
+
+# Kiosk-Geraet, Kabelverbindung reicht - WLAN deaktivieren (weniger
+# Verwirrung durch parallele DHCP-Adresse, kleinere Angriffsflaeche).
+# Gleiches Vorgehen wie im alten CamDisplay-Ansible-Setup (dtoverlay=disable-wifi).
+#
+# Vorher: evtl. beim Imaging (z.B. Raspberry Pi Imager) versehentlich
+# mitgegebene WLAN-Zugangsdaten entfernen - liegen sonst im Klartext in
+# /etc/netplan/*.yaml (verifiziert 2026-08-21, Passwort einer "IoT"-SSID
+# gefunden und entfernt).
+- name: Vorhandene WLAN-Verbindungsprofile ermitteln
+  command: nmcli -t -f NAME,TYPE connection show
+  register: camdisplay_nm_connections
+  changed_when: false
+
+- name: WLAN-Verbindungsprofile (samt Zugangsdaten) entfernen
+  command: "nmcli connection delete {{ item.split(':')[0] }}"
+  loop: "{{ camdisplay_nm_connections.stdout_lines | select('search', ':802-11-wireless') | list }}"
+
+- name: WLAN deaktivieren (dtoverlay, wirkt erst nach Reboot)
+  lineinfile:
+    path: /boot/firmware/config.txt
+    regexp: "^dtoverlay=disable-wifi"
+    line: "dtoverlay=disable-wifi"
+    insertafter: '^\[all\]'
+  register: camdisplay_wifi_disabled
+
+- name: Reboot fuer WLAN-Deaktivierung
+  reboot:
+    msg: "Reboot nach Deaktivierung von WLAN"
+  when: camdisplay_wifi_disabled is changed

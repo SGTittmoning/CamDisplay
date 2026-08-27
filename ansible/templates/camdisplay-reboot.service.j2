@@ -1,0 +1,6 @@
+[Unit]
+Description=Reboot after repeated CamDisplay failures (mit Obergrenze)
+
+[Service]
+Type=oneshot
+ExecStart=/root/bin/camdisplay-reboot-guard.sh

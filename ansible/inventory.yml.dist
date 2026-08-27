@@ -1,0 +1,8 @@
+camdisplay:
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+  hosts:
+    camdisplay1.example.lan:
+      ansible_host: 192.0.2.10
+      ansible_user: pi
+      stream_url: "rtsp://user:pass@camera-host:554/stream"

@@ -1,0 +1,78 @@
+---
+# CamDisplay Installation - systemd + ffplay direkt ueber KMS/DRM, kein X11.
+#
+# Voraussetzung: frisches Raspberry Pi OS Lite (64-bit), Pi 4 oder neuer
+# (vc4-kms-v3d als Standardtreiber). Siehe README.md im ansible/-Verzeichnis.
+#
+# Aufruf:
+#   ansible-playbook -i inventory.yml install.yml --limit <host>
+#
+# Optionen (per -e):
+#   camdisplay_enable_overlay=true   Read-only Root-FS (Overlay) + read-only
+#                                    Boot-Partition (bootro) aktivieren
+#                                    (Reboot!) - am besten erst NACH
+#                                    erfolgreichem Test. Auf einem Host, auf
+#                                    dem das Overlay schon aktiv ist, kann
+#                                    bootro NICHT mehr nachtraeglich per
+#                                    Playbook ergaenzt werden (raspi-config
+#                                    verweigert das) - dann stattdessen einmal
+#                                    manuell camdisplay-writable.sh rw/ro auf
+#                                    dem Host ausfuehren, siehe tasks/overlay.yml.
+
+- hosts: camdisplay
+  become: yes
+
+  vars:
+    camdisplay_timezone: Europe/Berlin
+    camdisplay_enable_overlay: false
+
+  tasks:
+
+    - name: stream_url muss gesetzt sein
+      assert:
+        that:
+          - stream_url is defined
+        fail_msg: "Bitte stream_url in der Inventory oder per -e setzen"
+
+    # Sicherheitscheck: alle folgenden Tasks schreiben Dateien (Pakete,
+    # /root/bin/*, systemd units, ...). Ist das Root-Overlay auf diesem Host
+    # bereits aktiv, landen diese Schreibvorgaenge NUR im fluechtigen
+    # tmpfs-Layer und sind nach dem naechsten Reboot spurlos weg - ohne
+    # Fehlermeldung, ohne "changed"-Warnung, einfach still verschwunden.
+    # Genau das ist am 2026-08-22 passiert: camdisplay-screenshot.sh wurde
+    # so "erfolgreich" deployt und war nach dem naechsten Reboot verschwunden.
+    - name: Root-Overlay-Status ermitteln (Sicherheitscheck)
+      command: raspi-config nonint get_overlay_now
+      register: camdisplay_preflight_overlay
+      changed_when: false
+
+    - name: Abbruch falls Root-Overlay bereits aktiv ist
+      assert:
+        that:
+          - camdisplay_preflight_overlay.stdout | trim != '0'
+        fail_msg: >-
+          Root-Overlay ist auf diesem Host bereits aktiv - Schreibvorgaenge
+          wuerden nur im fluechtigen tmpfs-Layer landen und beim naechsten
+          Reboot verloren gehen. Bitte zuerst auf dem Host selbst
+          'sudo /root/bin/camdisplay-writable.sh rw' ausfuehren (ggf. inkl.
+          des angezeigten Zwischen-Reboots), danach dieses Playbook laufen
+          lassen, und abschliessend 'sudo /root/bin/camdisplay-writable.sh ro'
+          (+ Reboot) um wieder read-only zu schalten.
+
+    - import_tasks: tasks/base.yml
+
+    - import_tasks: tasks/maintenance_scripts.yml
+
+    # Reihenfolge wichtig: alles was einen Reboot ausloesen kann MUSS vor
+    # kiosk_service.yml laufen, sonst startet der Dienst noch in der alten
+    # Systemumgebung und laeuft ins StartLimitBurst (siehe Testlauf 2026-08-21).
+
+    - import_tasks: tasks/overlay.yml
+      when: camdisplay_enable_overlay | bool
+
+    - import_tasks: tasks/kiosk_service.yml
+
+  handlers:
+    - name: daemon-reload
+      systemd:
+        daemon_reload: yes
