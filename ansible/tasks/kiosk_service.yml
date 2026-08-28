@@ -14,6 +14,7 @@
     owner: root
     group: root
     mode: '0600'
+  register: camdisplay_stream_env
 
 - name: systemd units kopieren
   template:
@@ -28,6 +29,7 @@
     - camdisplay-reboot-count-reset.service
     - camdisplay-reboot-count-reset.timer
   notify: daemon-reload
+  register: camdisplay_units_copied
 
 - meta: flush_handlers
 
@@ -37,8 +39,21 @@
     enabled: yes
     state: started
 
-- name: camdisplay.service aktivieren und starten
+# "state: started" allein reicht nicht, um eine geaenderte Unit-Datei oder
+# stream.env (z.B. neuer stream_url, oder wie hier: geaenderter User=) zu
+# uebernehmen - dafuer braucht es einen echten Neustart. Deshalb hier explizit
+# ermitteln, ob sich etwas geaendert hat, statt bei jedem install.yml-Lauf
+# blind "started" zu setzen (das haette schon bei diesem allerersten
+# User-Wechsel dazu gefuehrt, dass ffplay unbemerkt mit dem alten User
+# weiterlief).
+- name: Ermitteln, ob camdisplay.service neu gestartet werden muss
+  set_fact:
+    camdisplay_needs_restart: >-
+      {{ camdisplay_stream_env is changed or
+         (camdisplay_units_copied.results | selectattr('item', 'equalto', 'camdisplay.service') | map(attribute='changed') | first) }}
+
+- name: camdisplay.service aktivieren und starten (neu starten falls Unit-Datei/stream.env sich geaendert haben)
   systemd:
     name: camdisplay.service
     enabled: yes
-    state: started
+    state: "{{ 'restarted' if camdisplay_needs_restart else 'started' }}"

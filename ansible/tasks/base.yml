@@ -110,9 +110,18 @@
     msg: "Reboot nach Hostname-Aenderung"
   when: camdisplay_hostname_set is changed
 
+# ansible.builtin hat kein eigenes timezone-Modul (wanderte wie locale_gen
+# nach community.general) - deshalb hier ueber timedatectl direkt geloest,
+# um ohne Zusatz-Collection auszukommen (gleiches Muster wie beim Locale-Fix
+# oben).
+- name: Aktuelle Zeitzone ermitteln
+  command: timedatectl show --property=Timezone --value
+  register: camdisplay_current_timezone
+  changed_when: false
+
 - name: Zeitzone setzen
-  timezone:
-    name: "{{ camdisplay_timezone }}"
+  command: "timedatectl set-timezone {{ camdisplay_timezone }}"
+  when: camdisplay_current_timezone.stdout != camdisplay_timezone
 
 # Kiosk-Geraet, Kabelverbindung reicht - WLAN deaktivieren (weniger
 # Verwirrung durch parallele DHCP-Adresse, kleinere Angriffsflaeche).
