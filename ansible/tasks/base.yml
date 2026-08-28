@@ -73,7 +73,7 @@
 # Optional, ueber die Inventory-Variable camdisplay_hostname gesteuert (fuer
 # das Testgeraet i.d.R. nicht gesetzt). Wichtig fuer Netze, in denen der
 # DHCP-Server per Hostname automatisch einen DNS-Eintrag anlegt (z.B.
-# "camDisplayPistole.sg.lan") - eine DHCP-Reservierung allein (typischerweise
+# "camdisplay1.your-domain.lan") - eine DHCP-Reservierung allein (typischerweise
 # MAC-basiert) sorgt nur fuer eine feste IP, nicht fuer die DNS-Aufloesung.
 - name: Hostname setzen
   hostname:
