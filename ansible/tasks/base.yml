@@ -1,4 +1,35 @@
 ---
+# en_US.UTF-8 fehlt auf frischen Raspberry Pi OS Lite Images oft komplett -
+# fuehrt zu "setlocale: LC_ALL: cannot change locale"-Warnungen bei jedem
+# SSH-Login/Ansible-Lauf (harmlos, aber unnoetiger Laerm). ansible.builtin
+# hat kein eigenes locale_gen-Modul mehr (das wanderte nach community.general),
+# deshalb hier bewusst ueber locale-gen/lineinfile direkt geloest, um ohne
+# zusaetzliche Collection auszukommen.
+- name: en_US.UTF-8 Locale aktivieren (/etc/locale.gen)
+  lineinfile:
+    path: /etc/locale.gen
+    regexp: '^#?\s*en_US\.UTF-8 UTF-8'
+    line: 'en_US.UTF-8 UTF-8'
+  register: camdisplay_locale_gen_conf
+
+- name: Locale generieren
+  command: locale-gen
+  when: camdisplay_locale_gen_conf is changed
+
+- name: LANG in /etc/default/locale setzen
+  lineinfile:
+    path: /etc/default/locale
+    regexp: '^LANG='
+    line: 'LANG=en_US.UTF-8'
+    create: yes
+
+- name: LC_ALL in /etc/default/locale setzen
+  lineinfile:
+    path: /etc/default/locale
+    regexp: '^LC_ALL='
+    line: 'LC_ALL=en_US.UTF-8'
+    create: yes
+
 - name: apt-Cache aktualisieren (max. 1x pro Stunde)
   apt:
     update_cache: yes
