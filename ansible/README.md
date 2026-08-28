@@ -24,7 +24,7 @@ camdisplay:
       # camdisplay_hostname: camdisplay1
 ```
 
-`ansible_user` needs passwordless `sudo` on the target.
+`ansible_user` needs passwordless `sudo` on the target. It's only used for the Ansible connection/deployment — `camdisplay.service` itself runs as a separate, unprivileged system user (`camdisplay_service_user`, default `camdisplay`; override via `-e` or an inventory var), created automatically with no login shell and no sudo. Keeping these separate matters: `ansible_user` typically has broad sudo access, and `ffplay` is the one component here that continuously parses network-supplied video — it shouldn't run as an account that could escalate to root if it were ever compromised.
 
 `camdisplay_hostname` (optional) sets the OS hostname via the `hostname` module and reboots if it changed. It does **not** configure DHCP reservations or DNS itself — that's your router/DHCP server's job, keyed by MAC address — but many setups create a DNS record from the hostname a device reports over DHCP, so this is what makes e.g. `camdisplay1.your-domain.lan` resolve. Chicken-and-egg note: on a completely fresh install, that DNS name won't resolve yet (the Pi hasn't reported its new hostname over DHCP), so use the reserved IP directly for `ansible_host` on the very first run; once the hostname is set and the Pi has rebooted, the DNS name should work for subsequent runs (e.g. `maintain.yml`).
 

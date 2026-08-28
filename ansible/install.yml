@@ -25,6 +25,7 @@
   vars:
     camdisplay_timezone: Europe/Berlin
     camdisplay_enable_overlay: false
+    camdisplay_service_user: camdisplay
 
   tasks:
 

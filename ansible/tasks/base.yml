@@ -64,9 +64,25 @@
       - "'kmsgrab' in camdisplay_ffmpeg_devices.stdout"
     fail_msg: "Dieser ffmpeg-Build unterstuetzt kmsgrab nicht - headless Screenshots (camdisplay-screenshot.sh) funktionieren so nicht."
 
-- name: "{{ ansible_user }} in video/render Gruppen (KMS/DRM Zugriff)"
+- name: "{{ ansible_user }} in video/render Gruppen (fuer manuelles ffplay-Testen, KMS/DRM Zugriff)"
   user:
     name: "{{ ansible_user }}"
+    groups: video,render
+    append: yes
+
+# Eigener, unprivilegierter System-User fuer camdisplay.service - bewusst
+# NICHT der Ansible-Automatisierungsaccount ({{ ansible_user }}), der
+# ueblicherweise passwortloses sudo hat. Ein kompromittierter ffplay-Prozess
+# (z.B. durch eine Schwachstelle beim Dekodieren eines manipulierten Streams)
+# haette so keinen direkten Weg zu Root - nur Zugriff auf /dev/dri ueber die
+# video/render Gruppen, sonst nichts. Kein Login (nologin-Shell), kein
+# Home-Verzeichnis noetig.
+- name: Service-User "{{ camdisplay_service_user }}" fuer camdisplay.service anlegen
+  user:
+    name: "{{ camdisplay_service_user }}"
+    system: yes
+    shell: /usr/sbin/nologin
+    create_home: no
     groups: video,render
     append: yes
 

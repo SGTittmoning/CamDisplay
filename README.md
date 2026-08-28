@@ -41,7 +41,7 @@ No desktop, no X server, no login — `ffplay` renders straight to the framebuff
 - Raspberry Pi 4 or newer (or any SBC with a mainline KMS driver)
 - `ffmpeg` (provides `ffplay`), built with SDL2 `kmsdrm` support (default in Debian/Raspberry Pi OS packages)
 - `libegl1` and `libegl-mesa0` — **not** pulled in automatically by `ffmpeg`; without them `ffplay` fails with `Failed to create window: EGL not initialized`
-- The service user must be in the `video` and `render` groups for `/dev/dri` access
+- A dedicated, unprivileged service user (in the `video` and `render` groups for `/dev/dri` access, no login shell, no sudo) — don't run `ffplay` as whatever account has SSH/sudo access; a compromised `ffplay` (e.g. via a malformed-stream decoder bug) shouldn't have a path to root
 
 ### Files
 
@@ -58,7 +58,7 @@ OnFailure=camdisplay-reboot.service
 
 [Service]
 Type=simple
-User=pi
+User=camdisplay
 SupplementaryGroups=video render
 Environment=SDL_VIDEODRIVER=kmsdrm
 EnvironmentFile=/etc/camdisplay/stream.env
@@ -93,7 +93,8 @@ STREAM_URL="rtsp://user:pass@camera-host:554/stream"
 
 ```bash
 sudo apt install ffmpeg libegl1 libegl-mesa0
-sudo usermod -aG video,render pi
+sudo useradd --system --shell /usr/sbin/nologin --no-create-home camdisplay
+sudo usermod -aG video,render camdisplay
 
 sudo mkdir -p /etc/camdisplay
 sudo cp stream.env.example /etc/camdisplay/stream.env

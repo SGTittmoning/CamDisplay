@@ -8,7 +8,7 @@ OnFailure=camdisplay-reboot.service
 
 [Service]
 Type=simple
-User={{ ansible_user }}
+User={{ camdisplay_service_user }}
 SupplementaryGroups=video render
 Environment=SDL_VIDEODRIVER=kmsdrm
 EnvironmentFile=/etc/camdisplay/stream.env
