@@ -1,5 +1,7 @@
 # CamDisplay
 
+![Built with AI](https://img.shields.io/badge/Built_with-AI-success)
+
 Fullscreen kiosk display for a live camera stream (RTSP/RTMP) on a Raspberry Pi. Built for unattended, always-on operation: boots straight into the stream with no desktop or login step, restarts automatically if the stream drops, and reboots the device after repeated consecutive failures.
 
 Designed with power-loss resilience in mind — the device is assumed to be switched on/off via a hard power cut rather than a clean shutdown, so the moving parts are kept minimal.
