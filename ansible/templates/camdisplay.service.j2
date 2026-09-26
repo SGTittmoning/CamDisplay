@@ -12,7 +12,9 @@ User={{ camdisplay_service_user }}
 SupplementaryGroups=video render
 Environment=SDL_VIDEODRIVER=kmsdrm
 EnvironmentFile=/etc/camdisplay/stream.env
-ExecStart=/usr/bin/ffplay -fs -analyzeduration 1 -fflags -nobuffer -an -nostats -loglevel error "${STREAM_URL}"
+ExecStart=/usr/local/bin/camdisplay-run
+# ffplay exits with status 0 even when it cannot connect - keep Restart=always
+# (Restart=on-failure would never restart it).
 Restart=always
 RestartSec=10
 

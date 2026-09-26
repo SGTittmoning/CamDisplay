@@ -7,6 +7,18 @@
     group: root
     mode: '0755'
 
+# Start-Wrapper fuer camdisplay.service. Bewusst NICHT nach /root/bin (0700):
+# er laeuft als unprivilegierter Service-User und muss fuer ihn lesbar/
+# ausfuehrbar sein.
+- name: camdisplay-run (ffplay-Wrapper mit Log-Maskierung) nach /usr/local/bin kopieren
+  copy:
+    src: camdisplay-run.sh
+    dest: /usr/local/bin/camdisplay-run
+    owner: root
+    group: root
+    mode: '0755'
+  register: camdisplay_run_script
+
 - name: stream.env schreiben (enthaelt die Stream-URL/Zugangsdaten)
   template:
     src: stream.env.j2
@@ -33,14 +45,8 @@
 
 - meta: flush_handlers
 
-- name: camdisplay-reboot-count-reset.timer aktivieren und starten
-  systemd:
-    name: camdisplay-reboot-count-reset.timer
-    enabled: yes
-    state: started
-
 # "state: started" allein reicht nicht, um eine geaenderte Unit-Datei oder
-# stream.env (z.B. neuer stream_url, oder wie hier: geaenderter User=) zu
+# stream.env/Wrapper (z.B. neuer stream_url, oder wie hier: geaenderter User=) zu
 # uebernehmen - dafuer braucht es einen echten Neustart. Deshalb hier explizit
 # ermitteln, ob sich etwas geaendert hat, statt bei jedem install.yml-Lauf
 # blind "started" zu setzen (das haette schon bei diesem allerersten
@@ -50,7 +56,16 @@
   set_fact:
     camdisplay_needs_restart: >-
       {{ camdisplay_stream_env is changed or
+         camdisplay_run_script is changed or
          (camdisplay_units_copied.results | selectattr('item', 'equalto', 'camdisplay.service') | map(attribute='changed') | first) }}
+
+# Gleiches gilt fuer den Timer: eine geaenderte Timer-Datei (z.B. neue
+# Wiederholung) greift bei einem bereits laufenden Timer erst nach Neustart.
+- name: camdisplay-reboot-count-reset.timer aktivieren und starten (neu starten falls Timer-Datei geaendert)
+  systemd:
+    name: camdisplay-reboot-count-reset.timer
+    enabled: yes
+    state: "{{ 'restarted' if (camdisplay_units_copied.results | selectattr('item', 'equalto', 'camdisplay-reboot-count-reset.timer') | map(attribute='changed') | first) else 'started' }}"
 
 - name: camdisplay.service aktivieren und starten (neu starten falls Unit-Datei/stream.env sich geaendert haben)
   systemd:

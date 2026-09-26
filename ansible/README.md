@@ -22,9 +22,13 @@ camdisplay:
       # optional: sets the Pi's hostname, useful if your DHCP server creates
       # a DNS record from it (e.g. "camdisplay1.your-domain.lan")
       # camdisplay_hostname: camdisplay1
+      # optional: extra ffplay options, e.g. for an RTSP source
+      # camdisplay_stream_opts: "-rtsp_transport tcp"
 ```
 
 `ansible_user` needs passwordless `sudo` on the target. It's only used for the Ansible connection/deployment — `camdisplay.service` itself runs as a separate, unprivileged system user (`camdisplay_service_user`, default `camdisplay`; override via `-e` or an inventory var), created automatically with no login shell and no sudo. Keeping these separate matters: `ansible_user` typically has broad sudo access, and `ffplay` is the one component here that continuously parses network-supplied video — it shouldn't run as an account that could escalate to root if it were ever compromised.
+
+`camdisplay_stream_opts` (optional) is written to `stream.env` as `STREAM_OPTS` and appended to the `ffplay` command line. It is not set by default because `ffplay` aborts on options the input doesn't know — `-rtsp_transport tcp` breaks an RTMP URL (`Option rtsp_transport not found`). See the [top-level README](../README.md#files) for the flags the wrapper uses and why.
 
 `camdisplay_hostname` (optional) sets the OS hostname via the `hostname` module and reboots if it changed. It does **not** configure DHCP reservations or DNS itself — that's your router/DHCP server's job, keyed by MAC address — but many setups create a DNS record from the hostname a device reports over DHCP, so this is what makes e.g. `camdisplay1.your-domain.lan` resolve. Chicken-and-egg note: on a completely fresh install, that DNS name won't resolve yet (the Pi hasn't reported its new hostname over DHCP), so use the reserved IP directly for `ansible_host` on the very first run; once the hostname is set and the Pi has rebooted, the DNS name should work for subsequent runs (e.g. `maintain.yml`).
 
@@ -34,7 +38,9 @@ camdisplay:
 ansible-playbook -i inventory.yml install.yml --limit <host>
 ```
 
-Installs `ffmpeg` + `libegl1`/`libegl-mesa0`, deploys `camdisplay.service` and the reboot-guard units, and copies the manual maintenance scripts to `/root/bin/`.
+Installs `ffmpeg` + `libegl1`/`libegl-mesa0`, creates the unprivileged service user, deploys the `ffplay` start wrapper (`/usr/local/bin/camdisplay-run`, which also masks credentials in `ffplay`'s error output), `camdisplay.service` and the reboot-guard units, and copies the maintenance scripts to `/root/bin/`. The service is restarted whenever its unit file, the wrapper or `stream.env` changed.
+
+The reboot guard only reboots when the camera is reachable but `ffplay` keeps failing (max. 5 times); while the camera is unreachable, or once the limit is reached, it retries every 2 minutes without rebooting. Details in the [top-level README](../README.md#files).
 
 ### Read-only root filesystem
 
@@ -45,6 +51,8 @@ ansible-playbook -i inventory.yml install.yml --limit <host> -e camdisplay_enabl
 ```
 
 Enables `bootro` (read-only boot partition) and the root overlay together, in the order `raspi-config` requires (`bootro` first — it refuses to touch `/etc/fstab` once the overlay is already live). Triggers one reboot.
+
+If you lifted the read-only state with `camdisplay-writable.sh rw` and want it back via Ansible, re-running with `-e camdisplay_enable_overlay=true` works: the overlay is (re-)enabled whenever it is not active in the current boot, not only when the `overlayroot` package is missing.
 
 If a host already has the overlay active and you need to add `bootro` afterwards, `raspi-config` can no longer do it in one step — run `camdisplay-writable.sh rw` (reboot), then `camdisplay-writable.sh ro` (reboot) on the host directly instead (see `tasks/overlay.yml` for why).
 
@@ -82,12 +90,12 @@ Note that `camdisplay.service` itself picks its output connector the same way, b
 | `tasks/base.yml` | Packages, groups, timezone, WiFi removal/disable |
 | `tasks/maintenance_scripts.yml` | Deploys the `/root/bin/` scripts |
 | `tasks/overlay.yml` | Read-only root FS + boot partition (see above) |
-| `tasks/kiosk_service.yml` | `stream.env`, systemd units, service start |
+| `tasks/kiosk_service.yml` | Start wrapper, `stream.env`, systemd units, service (re)start |
 | `templates/` | Jinja2 templates for the systemd units and `stream.env` |
-| `files/` | Static files (the maintenance scripts) copied as-is |
+| `files/` | Static files copied as-is: the maintenance scripts (`/root/bin/`) and the start wrapper `camdisplay-run.sh` (`/usr/local/bin/`) |
 
 ## Notes
 
-- `stream_url` holds camera credentials — keep `inventory.yml` out of version control (already gitignored).
+- `stream_url` holds camera credentials — keep `inventory.yml` out of version control (already gitignored). Ideally use a read-only viewer account on the camera; see [Credentials](../README.md#credentials) for what can and cannot be hidden.
 - The maintenance scripts (`camdisplay-update.sh`, `camdisplay-writable.sh`) implement the overlay/bootro reboot dance described above; `tasks/overlay.yml` covers the same mechanism during install.
 - Task ordering in `install.yml` matters: anything that can trigger a reboot runs *before* `kiosk_service.yml` starts the service, so it never starts into a stale environment and runs into the reboot-guard's failure counter needlessly.

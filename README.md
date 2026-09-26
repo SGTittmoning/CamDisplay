@@ -2,7 +2,7 @@
 
 ![Built with AI](https://img.shields.io/badge/Built_with-AI-success)
 
-Fullscreen kiosk display for a live camera stream (RTSP/RTMP) on a Raspberry Pi. Built for unattended, always-on operation: boots straight into the stream with no desktop or login step, restarts automatically if the stream drops, and reboots the device after repeated consecutive failures.
+Fullscreen kiosk display for a live camera stream (RTSP/RTMP) on a Raspberry Pi. Built for unattended, always-on operation: boots straight into the stream with no desktop or login step, restarts automatically if the stream drops, and reboots the device after repeated *local* failures (a camera or network outage alone does not trigger reboots — it wouldn't help).
 
 Designed with power-loss resilience in mind — the device is assumed to be switched on/off via a hard power cut rather than a clean shutdown, so the moving parts are kept minimal.
 
@@ -64,7 +64,7 @@ User=camdisplay
 SupplementaryGroups=video render
 Environment=SDL_VIDEODRIVER=kmsdrm
 EnvironmentFile=/etc/camdisplay/stream.env
-ExecStart=/usr/bin/ffplay -fs -analyzeduration 1 -fflags -nobuffer -an -nostats -loglevel error "${STREAM_URL}"
+ExecStart=/usr/local/bin/camdisplay-run
 Restart=always
 RestartSec=10
 
@@ -72,7 +72,20 @@ RestartSec=10
 WantedBy=multi-user.target
 ```
 
-`/etc/systemd/system/camdisplay-reboot.service` — triggered automatically once systemd gives up restarting (`StartLimitBurst` exceeded within `StartLimitIntervalSec`), reproducing a "reboot after N consecutive failures" watchdog without any custom scripting:
+`/usr/local/bin/camdisplay-run` ([`camdisplay-run.sh`](systemd/camdisplay-run.sh)) is a small wrapper that starts `ffplay` and masks credentials in its error output before it reaches the journal (see [Credentials](#credentials)). The flags it uses, and why:
+
+| Flag | Why |
+|---|---|
+| `-autoexit` | Exit when the stream ends. Without it `ffplay` stays open on the last frame, so neither `Restart=always` nor the reboot guard ever fires and the display just freezes. |
+| `-rw_timeout 5000000` | Socket I/O timeout in µs: exit if the connection hangs without a clean end (camera or switch gone). Measured with ffmpeg 6.1: `ffplay` exits after roughly 3× this value (~15 s). **Don't use `-timeout` instead** — for RTMP that option means "wait for an *incoming* connection" and turns `ffplay` into a server. |
+| `-fflags +nobuffer` | Low latency. The `+` matters: `-nobuffer` *clears* the flag. |
+| `-flags low_delay -framedrop` | Low-latency decoding; drop frames rather than fall behind. |
+| `-analyzeduration 1` | Minimal stream analysis at startup. |
+| `-an -nostats -loglevel error` | No audio, quiet output. |
+
+`ffplay` also exits with status 0 when it can't connect, so the unit uses `Restart=always` (not `on-failure`). For RTSP sources add `STREAM_OPTS="-rtsp_transport tcp"` to `stream.env` (below) — it is deliberately not built in, because `ffplay` aborts on options the input doesn't know (`Option rtsp_transport not found`), which would kill the display for RTMP URLs. The freeze-detection timeout was verified with RTMP only, not with a real RTSP source.
+
+`/etc/systemd/system/camdisplay-reboot.service` — triggered automatically once systemd gives up restarting (`StartLimitBurst` exceeded within `StartLimitIntervalSec`):
 
 ```ini
 [Unit]
@@ -83,12 +96,20 @@ Type=oneshot
 ExecStart=/root/bin/camdisplay-reboot-guard.sh
 ```
 
-Plain `ExecStart=/sbin/reboot` works too, but has no upper bound: if the failure is *persistent* (a missing dependency, a bad config) rather than transient (a network blip), the device reboots forever. [`camdisplay-reboot-guard.sh`](systemd/camdisplay-reboot-guard.sh) caps this at a configurable number of reboots (default 5) and then disables the service instead of rebooting again, leaving the device reachable for a fix. [`camdisplay-reboot-count-reset.timer`](systemd/camdisplay-reboot-count-reset.timer) resets the counter a few minutes after a boot that stays up, so a later, unrelated failure gets the full budget again. Both scripts are careful to work whether or not the boot partition is mounted read-only (see [Storage hardening](#storage-hardening-optional) below).
+Plain `ExecStart=/sbin/reboot` would work but is a poor watchdog: it reboots forever on a *persistent* failure, and it also reboots when the camera is merely unreachable — which a reboot of the Pi can't fix and which would exhaust any reboot budget within minutes. [`camdisplay-reboot-guard.sh`](systemd/camdisplay-reboot-guard.sh) decides instead:
+
+- **Camera not reachable** (TCP probe to the host/port from `STREAM_URL`): no reboot, nothing counted; the service is started again after 2 minutes, for as long as it takes.
+- **Camera reachable but `ffplay` keeps failing**: reboot, at most 5 times (`MAX_REBOOTS`).
+- **Limit reached**: no further reboot (prevents a reboot loop on a persistent fault), but also not switched off for good — the same slow retry, so the display comes back once the cause is gone.
+
+If the target can't be derived from the URL (e.g. `udp://`), the probe is skipped and the second rule applies. [`camdisplay-reboot-count-reset.timer`](systemd/camdisplay-reboot-count-reset.timer) checks every 5 minutes and clears the counter once `camdisplay.service` has been running without interruption for at least 5 minutes. Both scripts work whether or not the boot partition is mounted read-only (see [Storage hardening](#storage-hardening-optional) below); the counter file is read defensively, since a power cut can leave a corrupt file on the FAT boot partition.
 
 `/etc/camdisplay/stream.env` (mode `600` — keep this out of version control, it holds credentials):
 
 ```bash
 STREAM_URL="rtsp://user:pass@camera-host:554/stream"
+# optional, extra ffplay options — e.g. for RTSP:
+#STREAM_OPTS="-rtsp_transport tcp"
 ```
 
 ### Setup
@@ -103,6 +124,8 @@ sudo cp stream.env.example /etc/camdisplay/stream.env
 sudo chmod 600 /etc/camdisplay/stream.env
 sudo "$EDITOR" /etc/camdisplay/stream.env   # set STREAM_URL
 
+sudo install -m 755 systemd/camdisplay-run.sh /usr/local/bin/camdisplay-run
+
 sudo mkdir -p /root/bin
 sudo cp systemd/camdisplay-reboot-guard.sh systemd/camdisplay-reboot-count-reset.sh /root/bin/
 sudo chmod 700 /root/bin/camdisplay-reboot-guard.sh /root/bin/camdisplay-reboot-count-reset.sh
@@ -115,6 +138,15 @@ sudo systemctl enable --now camdisplay.service camdisplay-reboot-count-reset.tim
 ```
 
 Example files for the above are in [`systemd/`](systemd/) and [`stream.env.example`](stream.env.example).
+
+### Credentials
+
+The camera URL usually contains credentials, and `ffplay` needs it as a command-line argument. What that means:
+
+- **Mitigated:** `stream.env` is mode `600`; the service runs as an unprivileged user; `camdisplay-run` masks the URL and credential-looking parts (`user:pass@`, `password=`, `token=`, ...) in `ffplay`'s error output, so they don't end up in the journal (`ffplay` prints the full URL on every connection error).
+- **Not avoidable with `ffplay`:** the URL stays visible in the process command line (`ps`, `/proc/<pid>/cmdline`, and the process list in `systemctl status`) to every local user. Mind this when pasting `systemctl status` output somewhere. A local relay (e.g. MediaMTX or go2rtc on `127.0.0.1`, doing the camera login itself) would remove it, at the price of another component.
+- **Recommended:** create a **read-only viewer account** on the camera for this display, so a leaked URL only allows watching the stream.
+- Mounting `/proc` with `hidepid=2` hides other users' processes, but can interfere with other system services; it is not set up here and not tested with this setup.
 
 ### Storage hardening (optional)
 
@@ -148,26 +180,38 @@ A minimal X session (no desktop environment) auto-starts a watchdog script that 
 #!/bin/bash
 
 STREAM_URL="rtsp://user:pass@camera-host:554/stream"
+CAMERA_HOST="camera-host"    # for the reachability check below
+CAMERA_PORT=554
 MAX_ERRORS=6
 LOGFILE="$(dirname "$0")/play_it.log"
 
 ERRORCOUNTER=0
 
 while true; do
-    ffplay -fs -analyzeduration 1 -fflags -nobuffer -an -nostats "$STREAM_URL" \
-        >> "$LOGFILE" 2>&1
+    # same flags as Setup A (see the table there); add -rtsp_transport tcp for RTSP
+    ffplay -autoexit -rw_timeout 5000000 -fs -analyzeduration 1 \
+        -fflags +nobuffer -flags low_delay -framedrop -an -nostats -loglevel error \
+        "$STREAM_URL" >> "$LOGFILE" 2>&1
 
-    ERRORCOUNTER=$((ERRORCOUNTER + 1))
-    echo "$(date): stream stopped (attempt ${ERRORCOUNTER})" >> "$LOGFILE"
+    # Only count failures while the camera is reachable: rebooting the Pi does
+    # not fix a camera/network outage (and would loop forever during one).
+    if timeout 3 bash -c 'exec 3<>"/dev/tcp/$0/$1"' "$CAMERA_HOST" "$CAMERA_PORT" 2>/dev/null; then
+        ERRORCOUNTER=$((ERRORCOUNTER + 1))
+        echo "$(date): stream stopped (attempt ${ERRORCOUNTER})" >> "$LOGFILE"
 
-    if [ "${ERRORCOUNTER}" -ge "${MAX_ERRORS}" ]; then
-        echo "$(date): too many failures, rebooting" >> "$LOGFILE"
-        sudo reboot
+        if [ "${ERRORCOUNTER}" -ge "${MAX_ERRORS}" ]; then
+            echo "$(date): too many failures, rebooting" >> "$LOGFILE"
+            sudo reboot
+        fi
+    else
+        echo "$(date): camera unreachable, retrying" >> "$LOGFILE"
     fi
 
     sleep 10
 done
 ```
+
+Unlike Setup A this has no cap on the number of reboots. `ffplay` writes the full URL, credentials included, to the log file on connection errors — keep the log readable only by the display user and see [Credentials](#credentials).
 
 ### Setup
 
@@ -192,9 +236,11 @@ done
 | Setting        | Description                                      |
 |----------------|---------------------------------------------------|
 | `STREAM_URL`   | RTSP or RTMP URL of the camera stream              |
+| `STREAM_OPTS`  | Optional extra `ffplay` options (e.g. `-rtsp_transport tcp` for RTSP) |
 | `MAX_ERRORS` / `StartLimitBurst` | Consecutive failures within `StartLimitIntervalSec` before the device reboots |
-| `MAX_REBOOTS` (in `camdisplay-reboot-guard.sh`) | Total reboots (default 5) before giving up and disabling the service instead of rebooting forever |
-| `ffplay` flags | `-fs` fullscreen, `-fflags -nobuffer` low latency, `-an` no audio, `-nostats`/`-loglevel error` quiet output |
+| `MAX_REBOOTS` (in `camdisplay-reboot-guard.sh`) | Reboots (default 5) while the camera is reachable but `ffplay` keeps failing; afterwards only slow retries, no more reboots |
+| `RETRY_DELAY` (in `camdisplay-reboot-guard.sh`) | Seconds (default 120) between restart attempts while the camera is unreachable or the reboot limit is reached |
+| `ffplay` flags | See the table under [Setup A → Files](#files) (set in `camdisplay-run.sh`) |
 
 ## License
 
