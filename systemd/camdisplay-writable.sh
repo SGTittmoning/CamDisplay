@@ -59,6 +59,7 @@ write_state() {
   [ "$was_ro" -eq 1 ] && mount -o remount,rw "$BOOT_DIR"
   echo "$1" > "$STATE_FILE"
   [ "$was_ro" -eq 1 ] && mount -o remount,ro "$BOOT_DIR"
+  return 0   # verhindert, dass "was_ro=0" (letzte Zeile liefert dann 1) unter set -e den Aufrufer abbricht
 }
 
 clear_state() {
@@ -68,6 +69,7 @@ clear_state() {
   [ "$was_ro" -eq 1 ] && mount -o remount,rw "$BOOT_DIR"
   rm -f "$STATE_FILE"
   [ "$was_ro" -eq 1 ] && mount -o remount,ro "$BOOT_DIR"
+  return 0   # verhindert, dass "was_ro=0" (letzte Zeile liefert dann 1) unter set -e den Aufrufer abbricht
 }
 
 print_status() {
