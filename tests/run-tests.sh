@@ -219,6 +219,37 @@ check "Wrapper: STREAM_OPTS werden getrennt vor der URL uebergeben, Sonderzeiche
 out=$(env -u STREAM_URL CAMDISPLAY_FFPLAY="$WORK/fake_ffplay" bash "$FILES/camdisplay-run.sh" 2>&1); W_RC=$?
 check "Wrapper: fehlende STREAM_URL wird abgelehnt" "nonzero" "$([ "$W_RC" -ne 0 ] && echo nonzero || echo zero)"
 
+echo "== Statische Pruefung: set -e-Falle ([ cond ] && cmd als letzte Anweisung) =="
+scan() { python3 "$ROOT/tests/trap-scan.py" "$@" > "$WORK/scan.out" 2>&1; echo $?; }
+cat > "$WORK/fx_trap_fn.sh" <<'EOF'
+f() {
+  local x=0
+  [ -n "$1" ] && x=1
+  [ "$x" -eq 1 ] && echo hit
+}
+EOF
+cat > "$WORK/fx_trap_end.sh" <<'EOF'
+echo start
+[ -f /nonexistent ] && rm /nonexistent
+EOF
+cat > "$WORK/fx_safe.sh" <<'EOF'
+f() {
+  [ -n "$1" ] && echo hit
+  return 0
+}
+g() { [ -n "$1" ] && echo hit || true; }
+k() { grep -q x "$1" && echo ja || echo nein; }
+h() { true; }
+[ -f /nonexistent ] && echo x
+exit 0
+EOF
+check "Scanner erkennt die Falle am Funktionsende (Selbsttest)" "1" "$(scan "$WORK/fx_trap_fn.sh")"
+check "Scanner erkennt die Falle am Skriptende (Selbsttest)" "1" "$(scan "$WORK/fx_trap_end.sh")"
+check "Scanner meldet abgesicherte Faelle nicht (Selbsttest)" "0" "$(scan "$WORK/fx_safe.sh")"
+rc=$(scan "$FILES"/*.sh "$ROOT"/systemd/*.sh)
+check "kein Skript im Repo endet auf die Falle (Details: tests/trap-scan.py)" "0" "$rc"
+[ "$rc" -ne 0 ] && sed 's/^/         /' "$WORK/scan.out"
+
 echo "== Spiegel systemd/ <-> ansible/ =="
 for f in "$FILES"/*.sh; do
   b=$(basename "$f")
