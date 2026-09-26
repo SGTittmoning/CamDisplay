@@ -25,11 +25,13 @@ set -euo pipefail
 BOOT_DIR="${CAMDISPLAY_BOOT_DIR:-/boot/firmware}"
 UPTIME_FILE="${CAMDISPLAY_UPTIME_FILE:-/proc/uptime}"
 STABLE_SECS="${CAMDISPLAY_STABLE_SECS:-300}"
+RUN_DIR="${CAMDISPLAY_RUN_DIR:-/run}"
 COUNT_FILE="$BOOT_DIR/.camdisplay-reboot-count"
+UNREACHABLE_FILE="$RUN_DIR/camdisplay-unreachable-count"   # siehe camdisplay-reboot-guard.sh
 
 # Nichts zu tun, wenn kein Zaehler existiert (kein Schreibzugriff auf die
 # Boot-Partition in diesem Fall).
-[ -f "$COUNT_FILE" ] || exit 0
+[ -f "$COUNT_FILE" ] || [ -f "$UNREACHABLE_FILE" ] || exit 0
 
 # Laeuft camdisplay.service seit mindestens STABLE_SECS ununterbrochen?
 service_stable() {
@@ -46,6 +48,12 @@ service_stable() {
 if ! service_stable; then
   exit 0
 fi
+
+# Fehlversuchs-Zaehler fuer "Kamera nicht erreichbar" (liegt in /run, tmpfs)
+rm -f "$UNREACHABLE_FILE"
+
+# Persistenter Reboot-Zaehler auf der Boot-Partition
+[ -f "$COUNT_FILE" ] || exit 0
 
 bootro_now() { raspi-config nonint get_bootro_now; }
 

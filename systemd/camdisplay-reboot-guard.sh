@@ -3,21 +3,27 @@
 # wiederholt gescheitert ist (StartLimitBurst erreicht). Entscheidet, was dann
 # sinnvoll ist:
 #
-#  1. Kamera per TCP NICHT erreichbar -> Netz- oder Kameraproblem (Kamera-
-#     Neustart, Switch, Kabel). Ein Reboot des Pi hilft dabei nicht. Kein
-#     Reboot, kein Zaehler; nach RETRY_DELAY Sekunden wird camdisplay.service
-#     erneut gestartet - so lange, bis die Kamera wieder da ist.
-#  2. Kamera erreichbar, ffplay scheitert trotzdem -> vermutlich lokales
-#     Problem (Treiber, Speicher, ...). Reboot, aber nur bis MAX_REBOOTS.
-#  3. Limit erreicht -> kein weiterer Reboot (verhindert eine Reboot-Schleife
-#     bei DAUERHAFTEM Fehler, z.B. fehlendes Paket), aber auch kein
-#     endgueltiges Abschalten: derselbe langsame Retry wie unter 1., damit die
-#     Anzeige zurueckkommt, sobald die Ursache (auch kameraseitig, z.B. zu
-#     viele gleichzeitige Clients) verschwunden ist. Den Zaehler setzt
+#  1. Kamera per TCP NICHT erreichbar: zuerst Geduld - Kamera-Neustart,
+#     Firmware-Update oder Switch-Reboot sind nach einigen Minuten vorbei, ein
+#     Reboot des Pi bringt dabei nichts. Bis UNREACHABLE_ATTEMPTS Fehlversuche
+#     lang: kein Reboot, kein Zaehler, nach RETRY_DELAY Sekunden erneuter
+#     Startversuch.
+#  2. Ab UNREACHABLE_ATTEMPTS Fehlversuchen in Folge trotzdem Reboot: Warten
+#     loest keine Probleme auf dem Pi selbst (DHCP-Lease weg, Link/Netz-Stack
+#     haengt, Infrastruktur-Aenderung) - ein Reboot baut das alles neu auf.
+#     Der Versuchszaehler liegt in /run und beginnt nach jedem Boot neu.
+#  3. Kamera erreichbar, ffplay scheitert trotzdem -> vermutlich lokales
+#     Problem (Treiber, Speicher, ...): sofort Reboot.
+#  Reboots aus 2. und 3. zaehlen gemeinsam gegen MAX_REBOOTS.
+#  4. Limit erreicht -> kein weiterer Reboot (verhindert eine Reboot-Schleife
+#     bei DAUERHAFTEM Fehler, z.B. fehlendes Paket, und begrenzt Schreibzugriffe
+#     auf die Boot-Partition), aber auch kein endgueltiges Abschalten:
+#     langsamer Retry im Abstand von RETRY_DELAY, damit die Anzeige
+#     zurueckkommt, sobald die Ursache verschwunden ist. Den Zaehler setzt
 #     camdisplay-reboot-count-reset.sh zurueck, sobald der Dienst stabil laeuft.
 #
 # Ist aus STREAM_URL kein TCP-Ziel ableitbar (z.B. udp://), wird die
-# Kamera-Pruefung uebersprungen und wie unter 2. verfahren.
+# Kamera-Pruefung uebersprungen und wie unter 3. verfahren.
 #
 # Der Zaehler liegt auf der Boot-Partition (siehe camdisplay-update.sh fuer
 # die Begruendung: uebersteht auch ein aktives Overlay-Root).
@@ -34,9 +40,14 @@ set -euo pipefail
 # gelten die Standardwerte.
 BOOT_DIR="${CAMDISPLAY_BOOT_DIR:-/boot/firmware}"
 STREAM_ENV="${CAMDISPLAY_STREAM_ENV:-/etc/camdisplay/stream.env}"
+RUN_DIR="${CAMDISPLAY_RUN_DIR:-/run}"
 COUNT_FILE="$BOOT_DIR/.camdisplay-reboot-count"
+# Fehlversuche bei unerreichbarer Kamera seit dem Boot (tmpfs - kein Schreibzugriff
+# auf die Boot-Partition, faellt beim Reboot von selbst weg)
+UNREACHABLE_FILE="$RUN_DIR/camdisplay-unreachable-count"
 MAX_REBOOTS=5
-RETRY_DELAY=120     # Sekunden bis zum naechsten Startversuch ohne Reboot
+UNREACHABLE_ATTEMPTS=3   # Fehlversuche bei unerreichbarer Kamera bis zum Reboot (je ca. 3 min)
+RETRY_DELAY=120          # Sekunden bis zum naechsten Startversuch ohne Reboot
 PROBE_TIMEOUT=3     # Sekunden fuer die TCP-Erreichbarkeitspruefung
 
 bootro_now() { raspi-config nonint get_bootro_now; }   # 0=aktiv (ro), 1=inaktiv (rw)
@@ -57,8 +68,8 @@ write_count() {
 # Arithmetik (oder einer fuehrenden 0 als Oktalzahl) abzubrechen.
 read_count() {
   local c=0
-  if [ -f "$COUNT_FILE" ]; then
-    c=$(cat "$COUNT_FILE" 2>/dev/null || true)
+  if [ -f "$1" ]; then
+    c=$(cat "$1" 2>/dev/null || true)
   fi
   [[ "$c" =~ ^[0-9]+$ ]] || c=0
   echo $((10#$c))
@@ -122,13 +133,25 @@ schedule_slow_retry() {
   return 0
 }
 
-if parse_stream_target && ! camera_reachable; then
-  log "Kamera $STREAM_HOST:$STREAM_PORT nicht erreichbar - Netz-/Kameraproblem, ein Reboot hilft nicht. Kein Reboot, naechster Startversuch in ${RETRY_DELAY}s."
-  schedule_slow_retry
-  exit 0
+reboot_reason="camdisplay.service wiederholt gescheitert, Kamera erreichbar (oder nicht pruefbar)"
+
+if parse_stream_target; then
+  if camera_reachable; then
+    rm -f "$UNREACHABLE_FILE"
+  else
+    unreachable=$(( $(read_count "$UNREACHABLE_FILE") + 1 ))
+    # /run nicht beschreibbar o.ae. darf den Retry nicht verhindern
+    echo "$unreachable" > "$UNREACHABLE_FILE" 2>/dev/null || true
+    if [ "$unreachable" -lt "$UNREACHABLE_ATTEMPTS" ]; then
+      log "Kamera $STREAM_HOST:$STREAM_PORT nicht erreichbar (Versuch $unreachable von $UNREACHABLE_ATTEMPTS) - kein Reboot, naechster Startversuch in ${RETRY_DELAY}s; danach Reboot, falls es ein Problem des Pi selbst ist (DHCP/Netz)."
+      schedule_slow_retry
+      exit 0
+    fi
+    reboot_reason="Kamera $STREAM_HOST:$STREAM_PORT seit $unreachable Versuchen nicht erreichbar - Reboot, um DHCP/Netz des Pi neu aufzubauen"
+  fi
 fi
 
-count=$(read_count)
+count=$(read_count "$COUNT_FILE")
 
 if [ "$count" -ge "$MAX_REBOOTS" ]; then
   log "Grenze von $MAX_REBOOTS Reboots erreicht - kein weiterer Reboot, camdisplay.service wird im Abstand von ${RETRY_DELAY}s erneut gestartet. Manuelle Pruefung empfohlen."
@@ -138,6 +161,6 @@ fi
 
 count=$((count + 1))
 write_count "$count"
-log "camdisplay.service wiederholt gescheitert, Kamera erreichbar (oder nicht pruefbar): Reboot $count von $MAX_REBOOTS"
+log "$reboot_reason: Reboot $count von $MAX_REBOOTS"
 reboot
 exit 0

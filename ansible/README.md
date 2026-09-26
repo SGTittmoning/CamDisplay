@@ -40,7 +40,7 @@ ansible-playbook -i inventory.yml install.yml --limit <host>
 
 Installs `ffmpeg` + `libegl1`/`libegl-mesa0`, creates the unprivileged service user, deploys the `ffplay` start wrapper (`/usr/local/bin/camdisplay-run`, which also masks credentials in `ffplay`'s error output), `camdisplay.service` and the reboot-guard units, and copies the maintenance scripts to `/root/bin/`. The service is restarted whenever its unit file, the wrapper or `stream.env` changed.
 
-The reboot guard only reboots when the camera is reachable but `ffplay` keeps failing (max. 5 times); while the camera is unreachable, or once the limit is reached, it retries every 2 minutes without rebooting. Details in the [top-level README](../README.md#files).
+The reboot guard is camera-aware: while the camera is unreachable it first retries every 2 minutes without rebooting, and reboots anyway after 3 failed attempts in a row (a reboot rebuilds DHCP/network on the Pi); with the camera reachable it reboots right away. At most 5 reboots in total, after that only slow retries. Details in the [top-level README](../README.md#files).
 
 ### Read-only root filesystem
 

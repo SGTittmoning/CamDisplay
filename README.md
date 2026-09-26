@@ -2,7 +2,7 @@
 
 ![Built with AI](https://img.shields.io/badge/Built_with-AI-success)
 
-Fullscreen kiosk display for a live camera stream (RTSP/RTMP) on a Raspberry Pi. Built for unattended, always-on operation: boots straight into the stream with no desktop or login step, restarts automatically if the stream drops, and reboots the device after repeated *local* failures (a camera or network outage alone does not trigger reboots — it wouldn't help).
+Fullscreen kiosk display for a live camera stream (RTSP/RTMP) on a Raspberry Pi. Built for unattended, always-on operation: boots straight into the stream with no desktop or login step, restarts automatically if the stream drops, and reboots the device after repeated failures — quickly for local problems, only after a few minutes of patience if the camera itself is unreachable.
 
 Designed with power-loss resilience in mind — the device is assumed to be switched on/off via a hard power cut rather than a clean shutdown, so the moving parts are kept minimal.
 
@@ -96,13 +96,14 @@ Type=oneshot
 ExecStart=/root/bin/camdisplay-reboot-guard.sh
 ```
 
-Plain `ExecStart=/sbin/reboot` would work but is a poor watchdog: it reboots forever on a *persistent* failure, and it also reboots when the camera is merely unreachable — which a reboot of the Pi can't fix and which would exhaust any reboot budget within minutes. [`camdisplay-reboot-guard.sh`](systemd/camdisplay-reboot-guard.sh) decides instead:
+Plain `ExecStart=/sbin/reboot` would work but is a poor watchdog: it reboots forever on a *persistent* failure, and it reboots immediately when the camera is merely unreachable, which is usually over in a few minutes and would burn through any reboot budget. [`camdisplay-reboot-guard.sh`](systemd/camdisplay-reboot-guard.sh) decides instead:
 
-- **Camera not reachable** (TCP probe to the host/port from `STREAM_URL`): no reboot, nothing counted; the service is started again after 2 minutes, for as long as it takes.
-- **Camera reachable but `ffplay` keeps failing**: reboot, at most 5 times (`MAX_REBOOTS`).
-- **Limit reached**: no further reboot (prevents a reboot loop on a persistent fault), but also not switched off for good — the same slow retry, so the display comes back once the cause is gone.
+- **Camera not reachable** (TCP probe to the host/port from `STREAM_URL`): be patient first — no reboot, nothing written to the boot partition, the service is started again after 2 minutes. A camera restart, firmware update or switch reboot is usually over by then.
+- **Still unreachable after 3 attempts in a row** (≈ 9 minutes; the attempt counter lives in `/run` and starts over after every boot): reboot anyway. Waiting doesn't fix problems on the Pi's side (lost DHCP lease, hung network stack, changed infrastructure); a reboot rebuilds all of that.
+- **Camera reachable but `ffplay` keeps failing**: reboot right away.
+- **Reboot limit reached** (5 in total, shared by the two rules above): no further reboot — this stops a reboot loop on a persistent fault and limits writes to the boot partition — but also not switched off for good: the same slow retry every 2 minutes, so the display comes back once the cause is gone.
 
-If the target can't be derived from the URL (e.g. `udp://`), the probe is skipped and the second rule applies. [`camdisplay-reboot-count-reset.timer`](systemd/camdisplay-reboot-count-reset.timer) checks every 5 minutes and clears the counter once `camdisplay.service` has been running without interruption for at least 5 minutes. Both scripts work whether or not the boot partition is mounted read-only (see [Storage hardening](#storage-hardening-optional) below); the counter file is read defensively, since a power cut can leave a corrupt file on the FAT boot partition.
+If the target can't be derived from the URL (e.g. `udp://`), the probe is skipped and the third rule applies. [`camdisplay-reboot-count-reset.timer`](systemd/camdisplay-reboot-count-reset.timer) checks every 5 minutes and clears the counters once `camdisplay.service` has been running without interruption for at least 5 minutes. Both scripts work whether or not the boot partition is mounted read-only (see [Storage hardening](#storage-hardening-optional) below), and they abort without rebooting if the reboot counter can't be persisted (e.g. a failed remount) rather than risk an uncapped reboot loop. The counter file is read defensively, since a power cut can leave a corrupt file on the FAT boot partition.
 
 `/etc/camdisplay/stream.env` (mode `600` — keep this out of version control, it holds credentials):
 
@@ -238,8 +239,9 @@ Unlike Setup A this has no cap on the number of reboots. `ffplay` writes the ful
 | `STREAM_URL`   | RTSP or RTMP URL of the camera stream              |
 | `STREAM_OPTS`  | Optional extra `ffplay` options (e.g. `-rtsp_transport tcp` for RTSP) |
 | `MAX_ERRORS` / `StartLimitBurst` | Consecutive failures within `StartLimitIntervalSec` before the device reboots |
-| `MAX_REBOOTS` (in `camdisplay-reboot-guard.sh`) | Reboots (default 5) while the camera is reachable but `ffplay` keeps failing; afterwards only slow retries, no more reboots |
-| `RETRY_DELAY` (in `camdisplay-reboot-guard.sh`) | Seconds (default 120) between restart attempts while the camera is unreachable or the reboot limit is reached |
+| `MAX_REBOOTS` (in `camdisplay-reboot-guard.sh`) | Total reboots (default 5); afterwards only slow retries, no more reboots |
+| `UNREACHABLE_ATTEMPTS` (in `camdisplay-reboot-guard.sh`) | Failed start bursts with the camera unreachable (default 3, ≈ 9 min) before rebooting anyway |
+| `RETRY_DELAY` (in `camdisplay-reboot-guard.sh`) | Seconds (default 120) between restart attempts without a reboot |
 | `ffplay` flags | See the table under [Setup A → Files](#files) (set in `camdisplay-run.sh`) |
 
 ## License
