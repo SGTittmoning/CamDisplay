@@ -9,3 +9,16 @@ camdisplay:
       # optional: setzt den Hostnamen auf dem Pi (fuer DHCP/DNS-Registrierung,
       # z.B. wenn der DHCP-Server daraus automatisch einen DNS-Eintrag macht)
       # camdisplay_hostname: camdisplay1
+      # optional: extra ffplay options, appended verbatim (written to stream.env).
+      # Off by default: ffplay aborts on options the input does not know, e.g.
+      # -rtsp_transport tcp breaks an RTMP URL. Use only for RTSP sources.
+      # camdisplay_stream_opts: "-rtsp_transport tcp"
+      #
+      # Every option below can also be set per host or in "vars:" above,
+      # or on the command line with -e. Defaults are shown.
+      # camdisplay_service_user: camdisplay      # unprivileged user that runs ffplay
+      # camdisplay_enable_watchdog: true         # hardware watchdog (systemd)
+      # camdisplay_watchdog_sec: 10              # 2-15 seconds
+      # camdisplay_enable_hardening: false       # firewall, avahi/Bluetooth off, SSH hardening
+      # camdisplay_ssh_disable_password_auth: true   # part of hardening; needs a key for ansible_user
+      # camdisplay_enable_overlay: false         # read-only root filesystem (see README)
