@@ -119,14 +119,26 @@ printf -- '- hosts: localhost\n  connection: local\n  gather_facts: no\n  tasks:
 if ! command -v systemctl >/dev/null 2>&1 || ! systemctl list-units >/dev/null 2>&1; then
   skip "fehlende Units" "kein laufendes systemd"
 else
-  check "nicht vorhandene Units: Task laeuft durch" "0" "$(play "$WORK/units_pb.yml")"
-  if [ "$(id -u)" -eq 0 ]; then skip "echter Fehler wird NICHT verschluckt" "als root nicht pruefbar (wuerde wirklich maskieren)"
-  else
-    sed -e 's/avahi-daemon.service/systemd-journald.service/; /avahi-daemon.socket/d; /bluetooth.service/d' "$WORK/units.yml" > "$WORK/units_real.yml"
-    printf -- '- hosts: localhost\n  connection: local\n  gather_facts: no\n  tasks:\n    - import_tasks: %s\n' "$WORK/units_real.yml" > "$WORK/units_pb2.yml"
-    rc=$(play "$WORK/units_pb2.yml")
-    check "echter Fehler (vorhandene Unit, keine Rechte) wird NICHT verschluckt" "nonzero" "$([ "$rc" -ne 0 ] && echo nonzero || echo zero)"
-  fi
+  # nur als normaler User: als root koennte "mask" auch fuer eine nicht vorhandene Unit
+  # einen Symlink unter /etc/systemd/system anlegen
+  if [ "$(id -u)" -eq 0 ]; then skip "nicht vorhandene Units mit dem echten systemd-Modul" "als root wuerde mask Symlinks anlegen"
+  else check "nicht vorhandene Units: Task laeuft durch" "0" "$(play "$WORK/units_pb.yml")"; fi
+  # Fehlerfall: das systemd-Modul wird durch "fail" ersetzt (aendert nichts am System -
+  # ein Test darf keine echte Unit maskieren), der failed_when-Ausdruck ist der echte.
+  python3 - "$A/tasks/hardening.yml" "$WORK/units_sim.yml" <<'EOF'
+import sys, yaml
+src, out = sys.argv[1:3]
+task = next(t for t in yaml.safe_load(open(src)) if str(t.get('name', '')).startswith('avahi (mDNS)'))
+task = {k: v for k, v in task.items() if k != 'systemd'}
+task['fail'] = {'msg': "{{ ('Could not find the requested service ' ~ item ~ ': host') if 'fehlt' in item else ('Failed to mask ' ~ item ~ ': Access denied') }}"}
+def pb(items):
+    return [{'hosts': 'localhost', 'connection': 'local', 'gather_facts': False, 'tasks': [dict(task, loop=items)]}]
+yaml.safe_dump(pb(['unit-fehlt.service']), open(out + '.missing', 'w'))
+yaml.safe_dump(pb(['unit-fehlt.service', 'unit-vorhanden.service']), open(out + '.real', 'w'))
+EOF
+  check "Simulation 'Could not find ...': Task laeuft durch" "0" "$(play "$WORK/units_sim.yml.missing")"
+  rc=$(play "$WORK/units_sim.yml.real")
+  check "Simulation echter Fehler ('Access denied'): wird NICHT verschluckt" "nonzero" "$([ "$rc" -ne 0 ] && echo nonzero || echo zero)"
 fi
 
 # --------------------------------------------------------------- Watchdog
