@@ -235,7 +235,10 @@ if [ "$EXPECT_WATCHDOG" -eq 1 ]; then
   [ -e "$R/dev/watchdog" ] && res PASS "/dev/watchdog vorhanden" || res FAIL "/dev/watchdog vorhanden" "fehlt (Treiber abgeschaltet oder anderes Board)"
   [ -e "$R/etc/systemd/system.conf.d/10-camdisplay-watchdog.conf" ] && res PASS "Watchdog-Drop-in vorhanden" || res FAIL "Watchdog-Drop-in vorhanden" "fehlt"
   wd=$(systemctl show --property=RuntimeWatchdogUSec --value 2>/dev/null)
-  case "$wd" in 10s|10000000) res PASS "Watchdog aktiv (RuntimeWatchdogUSec)" "$wd" ;; *) res WARN "Watchdog aktiv (RuntimeWatchdogUSec)" "meldet '${wd:-leer}', erwartet 10s (Manager neu gestartet? anderer Dienst haelt /dev/watchdog?)" ;; esac
+  # Erwartet wird der im Drop-in konfigurierte Wert (camdisplay_watchdog_sec ist einstellbar)
+  want=$(sed -n 's/^RuntimeWatchdogSec=\([0-9]\{1,\}\)$/\1/p' "$R/etc/systemd/system.conf.d/10-camdisplay-watchdog.conf" 2>/dev/null | head -n 1)
+  want=${want:-10}
+  case "$wd" in "${want}s"|"$((want * 1000000))") res PASS "Watchdog aktiv (RuntimeWatchdogUSec)" "$wd" ;; *) res WARN "Watchdog aktiv (RuntimeWatchdogUSec)" "meldet '${wd:-leer}', erwartet ${want}s (Manager neu gestartet? anderer Dienst haelt /dev/watchdog?)" ;; esac
 else
   wd=$(systemctl show --property=RuntimeWatchdogUSec --value 2>/dev/null); res INFO "Watchdog bewusst aus" "RuntimeWatchdogUSec=${wd:-?}"
 fi

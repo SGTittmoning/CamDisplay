@@ -144,6 +144,10 @@ check "Kamera nicht erreichbar -> WARN" "ja" "$(has WARN 'Kamera per TCP')"
 build; WIFI=1 run;                                             check "gespeichertes WLAN-Profil -> FAIL" "ja" "$(has FAIL 'keine gespeicherten WLAN')"
 build; SLOW_TIMER=1 run;                                       check "geplanter Retry-Timer -> WARN" "ja" "$(has WARN 'geplanter Neustartversuch')"
 build; WD_VALUE=0 run;                                         check "Watchdog nicht aktiv (0) -> WARN" "ja" "$(has WARN 'Watchdog aktiv')"
+build; printf '[Manager]\nRuntimeWatchdogSec=12\n' > "$F/etc/systemd/system.conf.d/10-camdisplay-watchdog.conf"; WD_VALUE=12s run
+check "eigener Watchdog-Wert (12 s) im Drop-in und aktiv -> PASS" "ja" "$(has PASS 'Watchdog aktiv')"
+build; printf '[Manager]\nRuntimeWatchdogSec=12\n' > "$F/etc/systemd/system.conf.d/10-camdisplay-watchdog.conf"; WD_VALUE=10s run
+check "Drop-in sagt 12 s, systemd meldet 10 s -> WARN" "ja" "$(has WARN 'Watchdog aktiv')"
 build; rm "$F/dev/watchdog"; run;                              check "kein /dev/watchdog -> FAIL" "ja" "$(has FAIL '/dev/watchdog')"
 build; rm "$F/dev/watchdog" "$F/etc/systemd/system.conf.d/10-camdisplay-watchdog.conf"; WD_VALUE=0 run --no-watchdog
 check "--no-watchdog: Watchdog bewusst aus, kein FAIL" "0/ja" "$V_RC/$(has INFO 'Watchdog bewusst aus')"

@@ -27,7 +27,8 @@ SECONDS_TEST=15
 ENV_FILE=""
 while [ $# -gt 0 ]; do
   case "$1" in
-    --seconds) shift; SECONDS_TEST="${1:-15}" ;;
+    --seconds) shift; SECONDS_TEST="${1:-15}"
+      case "$SECONDS_TEST" in ''|*[!0-9]*) echo "--seconds erwartet eine ganze Zahl" >&2; exit 2 ;; esac ;;
     --env-file) shift; ENV_FILE="${1:-}" ;;
     -h|--help) sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "Unbekannte Option: $1 (siehe --help)" >&2; exit 2 ;;
@@ -51,13 +52,17 @@ fi
 [ -n "$URL" ] || { echo "Keine URL angegeben." >&2; exit 2; }
 
 n_fail=0; n_warn=0
-# Filter: exakte URL und Zugangsdaten-Muster maskieren (awk statt bash-Ersetzung: portabel)
+# Filter: exakte URL und Zugangsdaten-Muster maskieren. Die URL geht per Umgebung an awk,
+# nicht per "-v": -v wertet Backslash-Folgen (\t, \\) aus, ein Passwort damit wuerde die
+# exakte Ersetzung verfehlen. Die Muster sind gross-/kleinschreibungsunabhaengig
+# ausgeschrieben (BSD-sed kennt kein "I"-Flag).
 mask() {
-  awk -v u="$URL" '{
+  MASK_URL="$URL" awk '{
+    u = ENVIRON["MASK_URL"]
     while (u != "" && (i = index($0, u)) > 0) $0 = substr($0, 1, i - 1) "<stream-url>" substr($0, i + length(u))
     print
   }' | sed -E -e 's#(://)[^/@[:space:]]*@#\1***@#g' \
-                -e 's#((pass(word|wd)?|pwd|token|secret|key)=)[^\&[:space:]"'"'"']*#\1***#g'
+                -e 's#(([Pp][Aa][Ss][Ss]([Ww][Oo][Rr][Dd]|[Ww][Dd])?|[Pp][Ww][Dd]|[Tt][Oo][Kk][Ee][Nn]|[Ss][Ee][Cc][Rr][Ee][Tt]|[Kk][Ee][Yy])=)[^&[:space:]"'"'"']*#\1***#g'
 }
 say()  { printf '%s\n' "$*" | mask; }
 pass() { say "  PASS  $*"; }
@@ -181,8 +186,11 @@ if [ "$HAVE_FFPLAY" -eq 1 ]; then
     if grep -q 'Connection refused' "$log" && [ $attempt -lt 3 ]; then sleep 1; continue; fi
     break
   done
+  # Die Shell meldet das Ende per Zeitlimit ("Alarm clock") selbst - keine ffplay-Ausgabe
+  grep -v 'Alarm clock' "$log" > "$log.f"; mv "$log.f" "$log"
   if grep -qi 'not found' "$log"; then fail "ffplay lehnt eine Option ab: $(grep -i 'not found' "$log" | head -n 1 | cut -c1-100)"
   elif grep -q 'Connection refused' "$log"; then fail "ffplay konnte die Quelle nicht oeffnen: $(grep -i 'refused' "$log" | head -n 1 | cut -c1-100)"
+  elif [ -s "$log" ]; then fail "ffplay meldet Fehler (Timeout, Anmeldung abgelehnt, Eingabefehler?): $(head -n 2 "$log" | tr '\n' ' ' | cut -c1-140)"
   elif [ "$rc" -eq 142 ] || [ "$rc" -eq 14 ] || [ "$rc" -eq 0 ]; then pass "ffplay akzeptiert alle Wrapper-Flags und laeuft ohne Fehlermeldung (bei Live-Streams greift das Zeitlimit regulaer)"
   else warn "ffplay endete mit rc=$rc: $(tail -n 2 "$log" | tr '\n' ' ' | cut -c1-120)"; fi
   rm -f "$log"

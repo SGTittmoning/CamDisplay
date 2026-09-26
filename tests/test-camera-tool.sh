@@ -75,6 +75,36 @@ echo "== Abfrage-Parameter mit Passwort in der URL (Reolink-Schema) =="
 run "rtmp://127.0.0.1:$PORT/live/test?channel=0&stream=0&user=admin&password=$SECRET_B"
 check "Passwort aus der Query wird maskiert" "nein" "$(has "$SECRET_B")"
 
+echo "== Maskierung (mask-Funktion direkt) =="
+maskrun() { # URL Eingabezeile
+  bash -c 'source <(sed -n "/^mask() {/,/^}/p" "$1"); URL="$2"; printf "%s\n" "$3" | mask' _ "$TOOL" "$1" "$2"
+}
+BS='pa\tss\\x'
+check "URL mit Backslashes im Passwort wird exakt ersetzt" "x <stream-url> y" "$(maskrun "rtmp://h/p?u=a&password=$BS" "x rtmp://h/p?u=a&password=$BS y")"
+check "Password= (Grossbuchstabe) wird maskiert" "x rtmp://h/p?Password=***&z=1 y" "$(maskrun "andere" 'x rtmp://h/p?Password=geheim&z=1 y')"
+check "Passwort mit Backslash wird bis zum '&' maskiert" "x rtmp://h/p?password=***&z=1 y" "$(maskrun "andere" "x rtmp://h/p?password=$BS&z=1 y")"
+check "TOKEN= und user:pass@ werden maskiert" "x rtmp://***@h/p?TOKEN=*** y" "$(maskrun "andere" 'x rtmp://u:p@h/p?TOKEN=abc y')"
+bash "$TOOL" --seconds abc > "$WORK/out.txt" 2>&1; check "--seconds mit Nicht-Zahl: Exit 2" "2" "$?"
+
+echo "== Port offen, aber kein Stream (ffplay endet mit Exit 0 und Fehlermeldung) =="
+python3 - "$WORK" <<'EOF' &
+import socket, sys
+s = socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+s.bind(("127.0.0.1", 0)); s.listen(5)
+open(sys.argv[1] + "/junk.port", "w").write(str(s.getsockname()[1]))
+s.settimeout(90)
+try:
+    while True:
+        c, _ = s.accept(); c.close()
+except Exception:
+    pass
+EOF
+JUNK_PID=$!
+for _ in 1 2 3 4 5 6 7 8 9 10; do [ -s "$WORK/junk.port" ] && break; sleep 0.3; done
+run "rtmp://user:$SECRET_A@127.0.0.1:$(cat "$WORK/junk.port")/live/test"
+check "kein PASS fuer ffplay, sondern FAIL (Exit 1)" "1/nein/ja" "$T_RC/$(has 'PASS +ffplay akzeptiert alle Wrapper-Flags')/$(has 'FAIL +ffplay (meldet Fehler|lehnt|konnte)')"
+kill "$JUNK_PID" 2>/dev/null
+
 echo "== Kamera nicht erreichbar =="
 run "rtmp://user:$SECRET_A@127.0.0.1:$DEAD/live/test"
 check "Exit 1 und klare Meldung" "1/ja" "$T_RC/$(has 'FAIL +TCP-Verbindung zu 127.0.0.1:[0-9]+ nicht moeglich')"
