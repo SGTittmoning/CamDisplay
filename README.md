@@ -103,6 +103,8 @@ Plain `ExecStart=/sbin/reboot` would work but is a poor watchdog: it reboots for
 - **Camera reachable but `ffplay` keeps failing**: reboot right away.
 - **Reboot limit reached** (5 in total, shared by the two rules above): no further reboot — this stops a reboot loop on a persistent fault and limits writes to the boot partition — but also not switched off for good: the same slow retry every 2 minutes, so the display comes back once the cause is gone.
 
+Before every reboot the guard saves the reason and the last 60 lines of the service's journal to `camdisplay-failure-log.txt` on the boot partition (`/boot/firmware/` on the device, or the FAT partition when the card/stick is put into a PC). With the read-only overlay active the journal is gone after the reboot, and *why* it rebooted is exactly what you want to know. The file is written in the same write window as the counter (no extra remount), is capped at 32 KiB (oldest entries drop out first), contains no credentials (`ffplay`'s output is already masked by the wrapper), and a failure to write it never prevents the reboot.
+
 If the target can't be derived from the URL (e.g. `udp://`), the probe is skipped and the third rule applies. [`camdisplay-reboot-count-reset.timer`](systemd/camdisplay-reboot-count-reset.timer) checks every 5 minutes and clears the counters once `camdisplay.service` has been running without interruption for at least 5 minutes. Both scripts work whether or not the boot partition is mounted read-only (see [Storage hardening](#storage-hardening-optional) below), and they abort without rebooting if the reboot counter can't be persisted (e.g. a failed remount) rather than risk an uncapped reboot loop. The counter file is read defensively, since a power cut can leave a corrupt file on the FAT boot partition.
 
 `/etc/camdisplay/stream.env` (mode `600` — keep this out of version control, it holds credentials):
@@ -255,6 +257,7 @@ Unlike Setup A this has no cap on the number of reboots. `ffplay` writes the ful
 | `MAX_ERRORS` / `StartLimitBurst` | Consecutive failures within `StartLimitIntervalSec` before the device reboots |
 | `MAX_REBOOTS` (in `camdisplay-reboot-guard.sh`) | Total reboots (default 5); afterwards only slow retries, no more reboots |
 | `UNREACHABLE_ATTEMPTS` (in `camdisplay-reboot-guard.sh`) | Failed start bursts with the camera unreachable (default 3, ≈ 9 min) before rebooting anyway |
+| `LOG_LINES` / `LOG_MAX_BYTES` (in `camdisplay-reboot-guard.sh`) | Journal lines saved per reboot (60) and size cap of `camdisplay-failure-log.txt` (32 KiB) |
 | `RETRY_DELAY` (in `camdisplay-reboot-guard.sh`) | Seconds (default 120) between restart attempts without a reboot |
 | `ffplay` flags | See the table under [Setup A → Files](#files) (set in `camdisplay-run.sh`) |
 

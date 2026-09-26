@@ -25,6 +25,16 @@
 # Ist aus STREAM_URL kein TCP-Ziel ableitbar (z.B. udp://), wird die
 # Kamera-Pruefung uebersprungen und wie unter 3. verfahren.
 #
+# Vor jedem Reboot werden die letzten Logzeilen von camdisplay.service (und der
+# Grund des Reboots) in camdisplay-failure-log.txt auf der Boot-Partition
+# gesichert: bei aktivem Overlay ist das Journal nach dem Reboot sonst weg, und
+# genau dann will man wissen, WARUM neu gestartet wurde. Die Datei ist auf
+# LOG_MAX_BYTES begrenzt (aelteste Eintraege fallen zuerst heraus), wird im
+# selben Schreibfenster wie der Zaehler geschrieben (ein remount, kein
+# zusaetzlicher FAT-Verschleiss durch Umschalten) und ist ueber einen PC
+# lesbar (Boot-Partition ist FAT). Die Ausgabe von ffplay ist bereits durch
+# camdisplay-run maskiert - keine Zugangsdaten im Log.
+#
 # Der Zaehler liegt auf der Boot-Partition (siehe camdisplay-update.sh fuer
 # die Begruendung: uebersteht auch ein aktives Overlay-Root).
 #
@@ -42,6 +52,9 @@ BOOT_DIR="${CAMDISPLAY_BOOT_DIR:-/boot/firmware}"
 STREAM_ENV="${CAMDISPLAY_STREAM_ENV:-/etc/camdisplay/stream.env}"
 RUN_DIR="${CAMDISPLAY_RUN_DIR:-/run}"
 COUNT_FILE="$BOOT_DIR/.camdisplay-reboot-count"
+LOG_FILE="$BOOT_DIR/camdisplay-failure-log.txt"
+LOG_LINES=60                                             # Logzeilen pro Reboot
+LOG_MAX_BYTES="${CAMDISPLAY_LOG_MAX_BYTES:-32768}"       # Obergrenze der Datei (Umgebung: nur fuer Tests)
 # Fehlversuche bei unerreichbarer Kamera seit dem Boot (tmpfs - kein Schreibzugriff
 # auf die Boot-Partition, faellt beim Reboot von selbst weg)
 UNREACHABLE_FILE="$RUN_DIR/camdisplay-unreachable-count"
@@ -54,11 +67,37 @@ bootro_now() { raspi-config nonint get_bootro_now; }   # 0=aktiv (ro), 1=inaktiv
 
 log() { logger -t camdisplay-reboot-guard "$*"; }
 
-write_count() {
+# Bericht fuer die Logdatei: Kopfzeile mit Reboot-Nummer, Uptime (Wanduhr ist ohne
+# RTC unzuverlaessig) und Grund, danach die letzten Zeilen des Dienstes mit
+# monotonen Zeitstempeln. Zeilen werden gekuerzt; fehlt journalctl, steht ein Hinweis da.
+failure_report() { # nummer grund
+  printf '=== Reboot %s von %s | Uptime %s s | %s\n' "$1" "$MAX_REBOOTS" \
+    "$(awk '{print int($1)}' /proc/uptime 2>/dev/null || echo '?')" "$2"
+  journalctl -u camdisplay.service -n "$LOG_LINES" --no-pager -o short-monotonic 2>/dev/null \
+    | cut -c1-300 || echo "(journalctl nicht verfuegbar)"
+  return 0
+}
+
+# Haengt den Bericht an die Logdatei an und kuerzt sie auf LOG_MAX_BYTES. Ueber
+# eine Temp-Datei, damit ein Stromausfall keine halbe Datei hinterlaesst. Ein
+# Fehler hier darf den Reboot nie verhindern - deshalb wird der Aufruf
+# abgesichert und die Funktion liefert immer 0.
+save_report() {
+  local tmp="$BOOT_DIR/.camdisplay-failure-log.tmp"
+  { [ -f "$LOG_FILE" ] && cat "$LOG_FILE"; printf '%s\n' "$1"; } | tail -c "$LOG_MAX_BYTES" > "$tmp" \
+    && mv "$tmp" "$LOG_FILE"
+  return 0
+}
+
+# Schreibt den Zaehler und - falls angegeben - den Bericht in EINEM Schreibfenster.
+write_count() { # zaehler [bericht]
   local was_ro=0
   [ "$(bootro_now)" -eq 0 ] && was_ro=1
   [ "$was_ro" -eq 1 ] && mount -o remount,rw "$BOOT_DIR"
   echo "$1" > "$COUNT_FILE"
+  if [ -n "${2:-}" ]; then
+    save_report "$2" || true
+  fi
   [ "$was_ro" -eq 1 ] && mount -o remount,ro "$BOOT_DIR"
   return 0   # verhindert, dass "was_ro=0" (letzte Zeile liefert dann 1) unter set -e den Aufrufer abbricht
 }
@@ -160,7 +199,7 @@ if [ "$count" -ge "$MAX_REBOOTS" ]; then
 fi
 
 count=$((count + 1))
-write_count "$count"
+write_count "$count" "$(failure_report "$count" "$reboot_reason")"
 log "$reboot_reason: Reboot $count von $MAX_REBOOTS"
 reboot
 exit 0

@@ -36,6 +36,13 @@ for c in logger reboot systemctl systemd-run; do
   printf '#!/bin/bash\necho "%s $*" >> "$STUB_LOG"\n' "$c" > "$STUBS/$c"
 done
 printf '#!/bin/bash\necho 0\n' > "$STUBS/id"
+cat > "$STUBS/journalctl" <<'EOF'
+#!/bin/bash
+echo "journalctl $*" >> "$STUB_LOG"
+[ "${FAIL_JOURNAL:-0}" = 1 ] && exit 1
+pad=""; [ "${STUB_LONG:-0}" -gt 0 ] && pad=$(printf 'x%.0s' $(seq 1 "$STUB_LONG"))
+for i in 1 2 3; do echo "[  $i.000] camdisplay: stub-journal-line-$i $pad"; done
+EOF
 cat > "$STUBS/apt-get" <<'EOF'
 #!/bin/bash
 echo "apt-get $*" >> "$STUB_LOG"
@@ -160,6 +167,31 @@ for spec in \
   new_env; BOOTRO=1 guard "${spec%%|*}"
   check "URL-Auswertung: Ziel ${spec##*|}" "ja" "$(grep -q "Kamera ${spec##*|} nicht erreichbar" "$STUB_LOG" && echo ja || echo nein)"
 done
+
+echo "== Reboot-Guard: Log vor dem Reboot sichern =="
+LOGF="$WORK/boot/camdisplay-failure-log.txt"
+new_env; BOOTRO=1 guard "rtmp://u:Fake_TopSecret9@127.0.0.1:$LIVE_PORT/x?password=Fake_TopSecret9"
+check "Reboot: Log mit Kopfzeile (Nummer, Grund) und Journalzeilen" "ja/ja/ja" \
+  "$(grep -q '^=== Reboot 1 von 5 | Uptime [0-9?]* s |' "$LOGF" && echo ja || echo nein)/$(grep -q 'stub-journal-line-3' "$LOGF" && echo ja || echo nein)/$(grep -q -- '-u camdisplay.service' "$STUB_LOG" && echo ja || echo nein)"
+check "Log enthaelt keine Zugangsdaten" "nein" "$(grep -q 'Fake_TopSecret9' "$LOGF" && echo ja || echo nein)"
+new_env; BOOTRO=0 guard "$LIVE"
+check "Boot read-only: Log liegt im selben Schreibfenster wie der Zaehler (genau 1x rw, 1x ro)" "1/1/ja" \
+  "$(grep -c 'remount,rw' "$STUB_LOG")/$(grep -c 'remount,ro' "$STUB_LOG")/$([ -f "$LOGF" ] && echo ja || echo nein)"
+new_env; BOOTRO=1 guard "$LIVE"; BOOTRO=1 guard "$LIVE"
+check "zweiter Reboot haengt an (beide Eintraege vorhanden)" "ja/ja" "$(grep -q '^=== Reboot 1 von' "$LOGF" && echo ja || echo nein)/$(grep -q '^=== Reboot 2 von' "$LOGF" && echo ja || echo nein)"
+new_env; for _ in 1 2 3 4; do CAMDISPLAY_LOG_MAX_BYTES=300 BOOTRO=1 guard "$LIVE"; done
+check "Datei bleibt unter der Obergrenze, neuester Eintrag bleibt erhalten" "ja/ja" \
+  "$([ "$(wc -c < "$LOGF")" -le 300 ] && echo ja || echo nein)/$(grep -q 'Reboot 4 von' "$LOGF" && echo ja || echo nein)"
+new_env; STUB_LONG=400 BOOTRO=1 guard "$LIVE"
+check "sehr lange Journalzeilen werden auf 300 Zeichen gekuerzt" "300" "$(awk '{ if (length($0) > m) m = length($0) } END { print m }' "$LOGF")"
+new_env; FAIL_JOURNAL=1 BOOTRO=1 guard "$LIVE"
+check "journalctl scheitert: Reboot trotzdem, Hinweis im Log" "0/ja/1/ja" "$G_RC/$(called reboot)/$(count)/$(grep -q 'journalctl nicht verfuegbar' "$LOGF" && echo ja || echo nein)"
+new_env; mkdir "$WORK/boot/.camdisplay-failure-log.tmp"; BOOTRO=1 guard "$LIVE"
+check "Log kann nicht geschrieben werden: Reboot und Zaehler trotzdem" "0/ja/1/nein" "$G_RC/$(called reboot)/$(count)/$([ -f "$LOGF" ] && echo ja || echo nein)"
+new_env; BOOTRO=1 guard "$DEAD"
+check "kein Reboot (nur Retry): keine Log-Datei" "nein" "$([ -f "$LOGF" ] && echo ja || echo nein)"
+new_env; echo 5 > "$WORK/boot/.camdisplay-reboot-count"; BOOTRO=1 guard "$LIVE"
+check "Limit erreicht (kein Reboot): keine Log-Datei" "nein" "$([ -f "$LOGF" ] && echo ja || echo nein)"
 
 echo "== Reboot-Zaehler zuruecksetzen =="
 reset() { # HAVE_COUNT HAVE_UNREACH ; Umgebung: STUB_ENTER STUB_INACTIVE BOOTRO
