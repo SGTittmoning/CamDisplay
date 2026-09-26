@@ -19,6 +19,9 @@
     mode: '0755'
   register: camdisplay_run_script
 
+# no_log: die Datei enthaelt die Zugangsdaten - ohne no_log erscheinen sie bei
+# --diff, -v und in CI-/Terminal-Logs im Klartext. Nachteil: schlaegt der Task
+# fehl, ist auch die Fehlermeldung verborgen (dann testweise no_log abschalten).
 - name: stream.env schreiben (enthaelt die Stream-URL/Zugangsdaten)
   template:
     src: stream.env.j2
@@ -27,6 +30,7 @@
     group: root
     mode: '0600'
   register: camdisplay_stream_env
+  no_log: true
 
 - name: systemd units kopieren
   template:
