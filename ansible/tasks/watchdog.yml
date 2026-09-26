@@ -1,0 +1,71 @@
+---
+# Hardware-Watchdog ueber systemd (RuntimeWatchdogSec). Standardmaessig an,
+# abschaltbar mit -e camdisplay_enable_watchdog=false.
+#
+# Hardware-Grenze: der Watchdog des Raspberry Pi (bcm2835-wdt) erlaubt hoechstens
+# ca. 15 Sekunden. systemd fuettert ihn mit dem doppelten Takt des Timeouts;
+# 10 Sekunden lassen genug Luft. Das Geraet /dev/watchdog muss vorhanden sein -
+# fehlt es (anderes Board, Treiber abgeschaltet), wird nichts gesetzt.
+#
+# Kollidiert mit einem installierten "watchdog"-Daemon (haelt /dev/watchdog
+# selbst); der ist hier nicht vorgesehen.
+
+- name: Watchdog-Timeout pruefen (2 bis 15 Sekunden)
+  assert:
+    that:
+      - camdisplay_watchdog_sec | int >= 2
+      - camdisplay_watchdog_sec | int <= 15
+    fail_msg: >-
+      camdisplay_watchdog_sec muss zwischen 2 und 15 Sekunden liegen (der Watchdog des
+      Raspberry Pi kann hoechstens ca. 15 s), ist aber "{{ camdisplay_watchdog_sec }}".
+
+- name: Ist ein Watchdog-Geraet vorhanden?
+  stat:
+    path: /dev/watchdog
+  register: camdisplay_watchdog_dev
+
+- name: Hinweis - kein /dev/watchdog, Watchdog wird uebersprungen
+  debug:
+    msg: "/dev/watchdog existiert nicht (anderes Board oder Treiber abgeschaltet) - Hardware-Watchdog wird nicht eingerichtet."
+  when: not camdisplay_watchdog_dev.stat.exists
+
+- name: systemd-Watchdog einrichten
+  when: camdisplay_watchdog_dev.stat.exists
+  block:
+    - name: /etc/systemd/system.conf.d anlegen
+      file:
+        path: /etc/systemd/system.conf.d
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Watchdog-Drop-in schreiben
+      template:
+        src: watchdog.conf.j2
+        dest: /etc/systemd/system.conf.d/10-camdisplay-watchdog.conf
+        owner: root
+        group: root
+        mode: "0644"
+      register: camdisplay_watchdog_conf
+
+    # Der Manager liest system.conf bei einem Re-Exec neu; ein Reboot ist nicht noetig.
+    - name: systemd neu einlesen (daemon-reexec)
+      systemd:
+        daemon_reexec: yes
+      when: camdisplay_watchdog_conf is changed
+
+    - name: Wirksamen Watchdog-Timeout auslesen
+      command: systemctl show --property=RuntimeWatchdogUSec --value
+      register: camdisplay_watchdog_effective
+      changed_when: false
+
+    # Nur warnen, nicht abbrechen: ein anderer Dienst kann den Watchdog halten -
+    # das ist ein Hinweis, kein Grund, die Installation zu stoppen.
+    - name: Warnung, falls der Watchdog nicht wie gewuenscht aktiv ist
+      debug:
+        msg: >-
+          RuntimeWatchdogUSec ist "{{ camdisplay_watchdog_effective.stdout }}" statt
+          {{ (camdisplay_watchdog_sec | int) * 1000000 }} - der Watchdog ist nicht wie
+          eingestellt aktiv (anderer Dienst haelt /dev/watchdog? Manager noch nicht neu gestartet?).
+      when: (camdisplay_watchdog_effective.stdout | trim) not in [(camdisplay_watchdog_sec | int * 1000000) | string, ((camdisplay_watchdog_sec | int) | string ~ 's')]

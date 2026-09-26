@@ -42,6 +42,10 @@ Installs `ffmpeg` + `libegl1`/`libegl-mesa0`, creates the unprivileged service u
 
 The reboot guard is camera-aware: while the camera is unreachable it first retries every 2 minutes without rebooting, and reboots anyway after 3 failed attempts in a row (a reboot rebuilds DHCP/network on the Pi); with the camera reachable it reboots right away. At most 5 reboots in total, after that only slow retries. Details in the [top-level README](../README.md#files).
 
+### Hardware watchdog
+
+On by default (`tasks/watchdog.yml`): `RuntimeWatchdogSec=10` via a systemd drop-in, applied with `daemon-reexec` (no reboot). `camdisplay_watchdog_sec` accepts 2–15 seconds (the Pi's watchdog maxes out at about 15 s); nothing is set if `/dev/watchdog` is missing; disable with `-e camdisplay_enable_watchdog=false`. A warning is printed if `systemctl show` reports a different effective value. See the [top-level README](../README.md#hardware-watchdog).
+
 ### OS hardening (optional)
 
 ```bash
@@ -97,6 +101,7 @@ Note that `camdisplay.service` itself picks its output connector the same way, b
 | `install.yml` / `maintain.yml` | Entry-point playbooks |
 | `tasks/base.yml` | Packages, groups, timezone, WiFi removal/disable |
 | `tasks/maintenance_scripts.yml` | Deploys the `/root/bin/` scripts |
+| `tasks/watchdog.yml` | Hardware watchdog via systemd (on by default) |
 | `tasks/hardening.yml` | Optional OS hardening: firewall, avahi/Bluetooth off, SSH (see above) |
 | `tasks/overlay.yml` | Read-only root FS + boot partition (see above) |
 | `tasks/kiosk_service.yml` | Start wrapper, `stream.env`, systemd units, service (re)start |

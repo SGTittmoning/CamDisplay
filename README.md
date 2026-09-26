@@ -163,6 +163,10 @@ sudo reboot
 
 With both active, nothing on disk changes at runtime — updates need a small dance to temporarily lift the read-only state, apply them, and lock it back down. [`camdisplay-writable.sh`](systemd/camdisplay-writable.sh) (manual config edits) and [`camdisplay-update.sh`](systemd/camdisplay-update.sh) (apt upgrades) handle that; drop them in `/root/bin/` for when Ansible access isn't available. Their state files deliberately live on the boot partition (never covered by the root overlay) so they survive the reboot in the middle of the process. If an upgrade fails halfway (e.g. no network), `camdisplay-update.sh` restores the protected state (boot partition read-only + overlay) and ends the cycle instead of leaving the device silently writable; start over with `begin`.
 
+### Hardware watchdog
+
+The Ansible playbook enables systemd's hardware watchdog by default (`RuntimeWatchdogSec=10` in a `system.conf.d` drop-in, plus `RebootWatchdogSec=2min` so a hung shutdown ends in a hard reset). systemd keeps feeding the SoC's watchdog; if the whole system hangs (kernel panic, blocked PID 1, I/O stall) the feeding stops and the hardware reboots the device — even when no process is responsive any more. The Raspberry Pi watchdog (`bcm2835-wdt`) accepts at most about 15 seconds, which is why the value is validated to 2–15 s. Nothing is set if `/dev/watchdog` doesn't exist. It does **not** catch a hung `ffplay` on an otherwise healthy system — that is what `-autoexit`/`-rw_timeout` and the reboot guard are for. Turn it off with `-e camdisplay_enable_watchdog=false`; manual setup is a two-line drop-in (`[Manager]` / `RuntimeWatchdogSec=10`, then `systemctl daemon-reexec`).
+
 ### OS hardening (optional)
 
 Off by default; enable with `-e camdisplay_enable_hardening=true` (Ansible, see [`ansible/README.md`](ansible/README.md)). It gives an always-on device on a shared network a much smaller attack surface:

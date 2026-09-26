@@ -1,0 +1,12 @@
+# Von Ansible verwaltet (camdisplay, tasks/watchdog.yml).
+#
+# systemd fuettert den Hardware-Watchdog des SoC. Haengt das ganze System
+# (Kernel-Panic, PID 1 blockiert, Speicher/IO-Stillstand), bleibt das Fuettern
+# aus und die Hardware startet das Geraet neu - auch dann, wenn kein Prozess
+# mehr reagiert. Faengt NICHT ab: ein haengender ffplay bei laufendem System
+# (dafuer sorgen -autoexit/-rw_timeout und der Reboot-Guard).
+[Manager]
+RuntimeWatchdogSec={{ camdisplay_watchdog_sec }}
+# Haengt der Shutdown selbst (z.B. USB-Speicher), nach 2 Minuten hart neu starten
+# statt der Standardvorgabe von 10.
+RebootWatchdogSec=2min

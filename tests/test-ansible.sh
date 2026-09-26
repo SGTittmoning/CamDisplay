@@ -129,6 +129,49 @@ else
   fi
 fi
 
+# --------------------------------------------------------------- Watchdog
+echo "== Hardware-Watchdog =="
+W="$A/tasks/watchdog.yml"
+render "$A/templates/watchdog.conf.j2" "$WORK/wd.conf" '{"camdisplay_watchdog_sec": 10}'
+check "Drop-in: RuntimeWatchdogSec=10 und RebootWatchdogSec=2min" "RuntimeWatchdogSec=10 RebootWatchdogSec=2min" "$(grep -E '^(RuntimeWatchdogSec|RebootWatchdogSec)=' "$WORK/wd.conf" | paste -sd' ')"
+render "$A/templates/watchdog.conf.j2" "$WORK/wd.conf" '{"camdisplay_watchdog_sec": 12}'
+check "Drop-in folgt camdisplay_watchdog_sec" "RuntimeWatchdogSec=12" "$(grep -E '^RuntimeWatchdogSec=' "$WORK/wd.conf")"
+
+# einzelne Tasks aus watchdog.yml (auch die verschachtelten) als Mini-Playbook herausziehen
+wd_task() { # task-name-praefix vars-json -> Exit-Code des Mini-Playbooks (Ausgabe in play.log)
+  python3 - "$W" "$1" "$2" "$WORK/wd_pb.yml" <<'EOF'
+import sys, json, yaml
+src, prefix, vars_json, out = sys.argv[1:5]
+def walk(tasks):
+    for t in tasks:
+        if str(t.get('name', '')).startswith(prefix): return t
+        for key in ('block', 'rescue', 'always'):
+            if key in t:
+                r = walk(t[key])
+                if r: return r
+task = walk(yaml.safe_load(open(src)))
+assert task, prefix
+pb = [{'hosts': 'localhost', 'connection': 'local', 'gather_facts': False, 'vars': json.loads(vars_json), 'tasks': [task]}]
+yaml.safe_dump(pb, open(out, 'w'))
+EOF
+  play "$WORK/wd_pb.yml"
+}
+for v in 2 10 15; do check "Timeout $v s ist zulaessig" "0" "$(wd_task 'Watchdog-Timeout pruefen' "{\"camdisplay_watchdog_sec\": $v}")"; done
+for v in 0 1 16 60; do check "Timeout $v s wird abgelehnt (Pi kann hoechstens ca. 15 s)" "nonzero" "$([ "$(wd_task 'Watchdog-Timeout pruefen' "{\"camdisplay_watchdog_sec\": $v}")" -ne 0 ] && echo nonzero || echo zero)"; done
+check "Timeout 'abc' wird abgelehnt" "nonzero" "$([ "$(wd_task 'Watchdog-Timeout pruefen' '{"camdisplay_watchdog_sec": "abc"}')" -ne 0 ] && echo nonzero || echo zero)"
+warned() { wd_task 'Warnung, falls' "{\"camdisplay_watchdog_sec\": 10, \"camdisplay_watchdog_effective\": {\"stdout\": \"$1\"}}" >/dev/null; grep -q 'RuntimeWatchdogUSec ist' "$WORK/play.log" && echo ja || echo nein; }
+check "systemctl meldet '10s': keine Warnung"            "nein" "$(warned '10s')"
+check "systemctl meldet '10000000': keine Warnung"       "nein" "$(warned '10000000')"
+check "systemctl meldet '0' (Watchdog aus): Warnung"     "ja"   "$(warned '0')"
+check "systemctl meldet '' (leer): Warnung"              "ja"   "$(warned '')"
+check "systemctl meldet '5s' (anderer Wert): Warnung"    "ja"   "$(warned '5s')"
+if [ -e /dev/watchdog ]; then skip "Ablauf ohne /dev/watchdog" "auf diesem Rechner existiert /dev/watchdog"
+else
+  printf -- '- hosts: localhost\n  connection: local\n  gather_facts: no\n  vars:\n    camdisplay_watchdog_sec: 10\n  tasks:\n    - import_tasks: %s\n' "$W" > "$WORK/wd_full.yml"
+  rc=$(play "$WORK/wd_full.yml")
+  check "ohne /dev/watchdog: Hinweis, nichts wird angefasst, Lauf endet erfolgreich" "0/ja" "$rc/$(grep -q 'wird nicht eingerichtet' "$WORK/play.log" && echo ja || echo nein)"
+fi
+
 echo
 echo "Ergebnis: $pass ok, $fail Fehler, $skipped uebersprungen"
 [ "$fail" -eq 0 ]

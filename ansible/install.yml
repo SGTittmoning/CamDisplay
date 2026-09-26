@@ -10,6 +10,8 @@
 # Optionen (per -e):
 #   camdisplay_enable_hardening=true Firewall, avahi/Bluetooth aus, SSH-Haertung
 #                                    (Opt-in, siehe tasks/hardening.yml)
+#   camdisplay_enable_watchdog=false Hardware-Watchdog NICHT einrichten
+#                                    (Standard: an, siehe tasks/watchdog.yml)
 #   camdisplay_enable_overlay=true   Read-only Root-FS (Overlay) + read-only
 #                                    Boot-Partition (bootro) aktivieren
 #                                    (Reboot!) - am besten erst NACH
@@ -34,6 +36,10 @@
     # Teil der Haertung: Passwort-Login abschalten (nur Key). Wird nur
     # umgesetzt, wenn der Ansible-User einen Key hat.
     camdisplay_ssh_disable_password_auth: true
+    # Hardware-Watchdog (systemd RuntimeWatchdogSec), siehe tasks/watchdog.yml.
+    # Der Pi kann hoechstens ca. 15 Sekunden.
+    camdisplay_enable_watchdog: true
+    camdisplay_watchdog_sec: 10
 
   tasks:
 
@@ -78,6 +84,9 @@
 
     - import_tasks: tasks/hardening.yml
       when: camdisplay_enable_hardening | bool
+
+    - import_tasks: tasks/watchdog.yml
+      when: camdisplay_enable_watchdog | bool
 
     - import_tasks: tasks/overlay.yml
       when: camdisplay_enable_overlay | bool
