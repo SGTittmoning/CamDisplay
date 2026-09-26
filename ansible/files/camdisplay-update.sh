@@ -18,6 +18,13 @@
 #                                      bereinigen, Boot-RO + OverlayFS wieder
 #                                      aktivieren -> danach nochmal manuell
 #                                      rebooten
+#
+# Schlaegt "apply" nach dem ersten Eingriff fehl (z.B. apt ohne Netz), wird
+# der geschuetzte Zustand (Boot-RO + OverlayFS) trotzdem wiederhergestellt und
+# der Zyklus beendet - das Geraet bleibt nie unbemerkt beschreibbar. Ein
+# einfaches Wiederholen von "apply" wuerde das nicht leisten: Boot-RO waere
+# dann schon aus, bootro_now meldet "inaktiv", und der Lauf stellte es nach
+# dem Erfolg nie wieder her. Nach einem Abbruch also mit "begin" neu starten.
 
 set -euo pipefail
 
@@ -101,6 +108,31 @@ cmd_begin() {
   fi
 }
 
+# EXIT-Trap von cmd_apply: laeuft der Update-Lauf nicht bis zum Ende durch,
+# wird der geschuetzte Zustand wiederhergestellt. Jeder Schritt einzeln mit
+# "|| true", damit ein weiterer Fehler die Wiederherstellung nicht abbricht.
+APPLY_COMPLETE=0
+BOOTRO_WAS_ACTIVE=0
+restore_protection_after_failure() {
+  if [ "$APPLY_COMPLETE" -ne 1 ]; then
+    {
+      echo ""
+      echo "!!! FEHLER: Der Update-Lauf ist abgebrochen (Ursache siehe Meldungen darueber)."
+      echo "!!! Stelle den geschuetzten Zustand wieder her, damit das Geraet nicht"
+      echo "!!! unbemerkt beschreibbar bleibt. Der Zyklus ist damit beendet; das System"
+      echo "!!! kann unvollstaendig aktualisiert sein. Zum Wiederholen: sudo $0 begin"
+    } >&2
+    clear_state || true
+    if [ "$BOOTRO_WAS_ACTIVE" -eq 1 ]; then
+      raspi-config nonint enable_bootro || echo "!!! enable_bootro fehlgeschlagen - bitte pruefen: sudo $0 status" >&2
+      mount -o remount,ro "$BOOT_DIR" || true
+    fi
+    raspi-config nonint enable_overlayfs || echo "!!! enable_overlayfs fehlgeschlagen - bitte pruefen: sudo $0 status" >&2
+    echo "!!! Bitte jetzt rebooten, damit OverlayFS/Boot-RO wieder aktiv werden." >&2
+  fi
+  return 0
+}
+
 cmd_apply() {
   require_root
   if [ ! -f "$STATE_FILE" ]; then
@@ -119,6 +151,9 @@ cmd_apply() {
   fi
 
   echo "OverlayFS ist inaktiv (live), fahre fort."
+
+  # ab hier wird das System veraendert: bei Abbruch Schutz wiederherstellen
+  trap restore_protection_after_failure EXIT
 
   BOOTRO_WAS_ACTIVE=0
   if [ "$(bootro_now)" -eq 0 ]; then
@@ -151,6 +186,7 @@ cmd_apply() {
   raspi-config nonint enable_overlayfs
 
   clear_state
+  APPLY_COMPLETE=1
 
   echo ""
   echo "Fertig. Bitte jetzt final rebooten, damit OverlayFS/Boot-RO wieder"

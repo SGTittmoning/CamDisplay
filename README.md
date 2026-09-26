@@ -138,7 +138,7 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now camdisplay.service camdisplay-reboot-count-reset.timer
 ```
 
-Example files for the above are in [`systemd/`](systemd/) and [`stream.env.example`](stream.env.example).
+Example files for the above are in [`systemd/`](systemd/) and [`stream.env.example`](stream.env.example). The files in `systemd/` are generated from the Ansible sources by [`tools/sync-systemd-examples.sh`](tools/sync-systemd-examples.sh) — edit `ansible/`, then re-run the script (CI fails if they drift apart).
 
 ### Credentials
 
@@ -161,7 +161,7 @@ sudo reboot
 
 `enable_bootro` must run *before* `enable_overlayfs` — `raspi-config` refuses to touch `/etc/fstab` while the root overlay is already live (editing it would only land in the volatile overlay and vanish on reboot). The Ansible playbook (`camdisplay_enable_overlay=true`) does this in the right order automatically.
 
-With both active, nothing on disk changes at runtime — updates need a small dance to temporarily lift the read-only state, apply them, and lock it back down. [`camdisplay-writable.sh`](systemd/camdisplay-writable.sh) (manual config edits) and [`camdisplay-update.sh`](systemd/camdisplay-update.sh) (apt upgrades) handle that; drop them in `/root/bin/` for when Ansible access isn't available. Their state files deliberately live on the boot partition (never covered by the root overlay) so they survive the reboot in the middle of the process.
+With both active, nothing on disk changes at runtime — updates need a small dance to temporarily lift the read-only state, apply them, and lock it back down. [`camdisplay-writable.sh`](systemd/camdisplay-writable.sh) (manual config edits) and [`camdisplay-update.sh`](systemd/camdisplay-update.sh) (apt upgrades) handle that; drop them in `/root/bin/` for when Ansible access isn't available. Their state files deliberately live on the boot partition (never covered by the root overlay) so they survive the reboot in the middle of the process. If an upgrade fails halfway (e.g. no network), `camdisplay-update.sh` restores the protected state (boot partition read-only + overlay) and ends the cycle instead of leaving the device silently writable; start over with `begin`.
 
 ---
 

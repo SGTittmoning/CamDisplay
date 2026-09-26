@@ -62,7 +62,7 @@ If a host already has the overlay active and you need to add `bootro` afterwards
 ansible-playbook -i inventory.yml maintain.yml --limit <host>
 ```
 
-Applies OS updates. Safe with a read-only root filesystem active — drives the same overlay/bootro-aware sequence as `camdisplay-update.sh` (temporarily lift read-only, `apt full-upgrade`, restore, reboot) rather than a plain `apt upgrade`, which would silently do nothing useful under an active overlay.
+Applies OS updates. Safe with a read-only root filesystem active — drives the same overlay/bootro-aware sequence as `camdisplay-update.sh` (temporarily lift read-only, `apt full-upgrade`, restore, reboot) rather than a plain `apt upgrade`, which would silently do nothing useful under an active overlay. If a step fails, the script puts the read-only protection back and ends the update cycle, so the play fails with a loud message but the device is not left writable; re-run `maintain.yml` to start over.
 
 ## Verifying the display headlessly (screenshot)
 
