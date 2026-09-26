@@ -1,0 +1,22 @@
+# ansible-lint fuer die Playbooks unter ansible/.
+#
+# Stil-Regeln sind bewusst abgeschaltet: Kurzformen wie "apt:" statt
+# "ansible.builtin.apt:", Gross-/Kleinschreibung von Task-Namen und "yes"
+# statt "true" wuerden einen Massen-Umbau der auf Hardware getesteten Playbooks
+# ohne inhaltlichen Nutzen erfordern. Aktiv bleiben die Regeln, die echte
+# Fehler finden (Syntax, Idempotenz-Angaben, riskante Dateirechte, ...).
+skip_list:
+  - fqcn
+  - name[casing]
+  - name[missing]
+  - name[template]
+  - name[play]
+  - yaml[truthy]
+  - yaml[line-length]
+  # Reboots muessen inline laufen und nicht als Handler am Playende: alles, was
+  # einen Reboot ausloesen kann, muss VOR dem Start des Dienstes passieren
+  # (siehe Kommentar in install.yml).
+  - no-handler
+  # "systemctl is-active" ist eine reine Abfrage; das systemd-Modul kann das
+  # nicht als Pruefung ausdruecken.
+  - command-instead-of-module

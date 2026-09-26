@@ -26,6 +26,7 @@
 
     - name: "Phase 1: Update-Zyklus starten (begin)"
       command: /root/bin/camdisplay-update.sh begin
+      changed_when: true
 
     - name: Zwischenstatus auslesen
       command: /root/bin/camdisplay-update.sh status
@@ -40,6 +41,7 @@
     - name: "Phase 2: Updates einspielen (apply)"
       command: /root/bin/camdisplay-update.sh apply
       register: camdisplay_apply_result
+      changed_when: true
 
     - name: Ergebnis von apply anzeigen
       debug:

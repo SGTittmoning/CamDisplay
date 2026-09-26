@@ -14,6 +14,7 @@
 
 - name: Locale generieren
   command: locale-gen
+  changed_when: true
   when: camdisplay_locale_gen_conf is changed
 
 - name: LANG in /etc/default/locale setzen
@@ -22,6 +23,7 @@
     regexp: '^LANG='
     line: 'LANG=en_US.UTF-8'
     create: yes
+    mode: '0644'
 
 - name: LC_ALL in /etc/default/locale setzen
   lineinfile:
@@ -29,6 +31,7 @@
     regexp: '^LC_ALL='
     line: 'LC_ALL=en_US.UTF-8'
     create: yes
+    mode: '0644'
 
 - name: apt-Cache aktualisieren (max. 1x pro Stunde)
   apt:
@@ -121,6 +124,7 @@
 
 - name: Zeitzone setzen
   command: "timedatectl set-timezone {{ camdisplay_timezone }}"
+  changed_when: true
   when: camdisplay_current_timezone.stdout != camdisplay_timezone
 
 # Kiosk-Geraet, Kabelverbindung reicht - WLAN deaktivieren (weniger
@@ -148,6 +152,7 @@
       - delete
       - uuid
       - "{{ item.split(':')[0] }}"
+  changed_when: true
   loop: "{{ camdisplay_nm_connections.stdout_lines | select('search', ':(802-11-wireless|wifi)$') | list }}"
 
 - name: WLAN deaktivieren (dtoverlay, wirkt erst nach Reboot)

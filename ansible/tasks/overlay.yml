@@ -49,11 +49,13 @@
 
 - name: Boot-Partition read-only setzen (nur moeglich solange Overlay noch inaktiv ist)
   command: raspi-config nonint enable_bootro
+  changed_when: true
   when: camdisplay_bootro_status.stdout | trim != '0'
   register: camdisplay_bootro_enabled
 
 - name: Overlay-Root aktivieren (installiert bei Bedarf das overlayroot-Paket)
   command: raspi-config nonint enable_overlayfs
+  changed_when: true
   when: "'install ok installed' not in camdisplay_overlayroot_pkg.stdout or camdisplay_overlay_live.stdout | trim != '0'"
   register: camdisplay_overlay_enabled
 
