@@ -35,6 +35,8 @@ jobs:
       - uses: actions/checkout@v6
       - name: Regression tests for the maintenance scripts (stubbed system commands, no hardware)
         run: tests/run-tests.sh
+      - name: Tests for the post-install self-check (fake device tree, stubbed commands)
+        run: tests/test-verify.sh
 
   ansible:
     if: github.event.repository.private == false
