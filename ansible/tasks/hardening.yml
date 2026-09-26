@@ -1,0 +1,170 @@
+---
+# OS-Haertung (Opt-in): install.yml ... -e camdisplay_enable_hardening=true
+#
+# Was passiert:
+#  - Firewall (nftables): eingehend alles verboten ausser Loopback, bereits
+#    etablierten Verbindungen, Standard-ICMP und SSH. Ausgehend bleibt alles
+#    erlaubt (Stream von der Kamera).
+#  - avahi (mDNS) und Bluetooth aus: auf einem Kiosk ohne Peripherie ungenutzte
+#    Angriffsflaeche. Danach loesen keine "<name>.local"-Namen mehr auf.
+#  - SSH: kein Root-Login, kein X11-Forwarding, tote Sessions werden getrennt,
+#    und (abschaltbar) nur Key-Login statt Passwort.
+#
+# Aussperren ist das Risiko dieser Datei. Deshalb: die Firewall-Regeln werden
+# vor der Uebernahme per "nft -c" geprueft und lassen SSH ausdruecklich zu; das
+# Passwort-Login wird nur abgeschaltet, wenn der Ansible-User einen Key hat;
+# die SSH-Konfiguration wird nach dem Schreiben mit "sshd -T" auf ihre
+# WIRKSAMEN Werte geprueft und bei Abweichung wieder entfernt, bevor sshd sie
+# laedt.
+#
+# Reboots (Bluetooth per dtoverlay) stehen bewusst am Ende dieser Datei, aber
+# noch vor dem Start des Dienstes (siehe Reihenfolge in install.yml).
+
+# ---------------------------------------------------------------- Firewall
+- name: nftables-Paket installieren
+  apt:
+    name: nftables
+    state: present
+
+# validate: Ansible prueft die Regeldatei per "nft -c -f", BEVOR sie nach
+# /etc/nftables.conf uebernommen wird - ein Syntaxfehler schaltet nie eine
+# kaputte Regel scharf.
+- name: Firewall-Regelwerk einspielen (Default-Deny eingehend, SSH erlaubt)
+  copy:
+    src: nftables.conf
+    dest: /etc/nftables.conf
+    owner: root
+    group: root
+    mode: "0640"
+    validate: "nft -c -f %s"
+  register: camdisplay_nftables_conf
+
+- name: nftables aktivieren und starten
+  systemd:
+    name: nftables
+    enabled: yes
+    state: "{{ 'restarted' if camdisplay_nftables_conf is changed else 'started' }}"
+
+# --------------------------------------------------- ungenutzte Dienste aus
+# Service UND Socket maskieren, nicht nur deaktivieren: avahi-daemon.socket
+# wuerde den Dienst sonst beim naechsten eingehenden mDNS-Paket wieder starten.
+# Fehlt eine Unit ganz (z.B. Image ohne bluez), gibt es nichts abzuschalten -
+# das ist kein Fehler.
+- name: avahi (mDNS) und Bluetooth stoppen, deaktivieren und maskieren
+  systemd:
+    name: "{{ item }}"
+    state: stopped
+    enabled: no
+    masked: yes
+  loop:
+    - avahi-daemon.service
+    - avahi-daemon.socket
+    - bluetooth.service
+  register: camdisplay_masked_units
+  failed_when: camdisplay_masked_units is failed and 'Could not find' not in (camdisplay_masked_units.msg | default(''))
+
+# ------------------------------------------------------------------- SSH
+- name: Vorpruefung fuer "nur Key-Login" - hat der Ansible-User einen Key?
+  when: camdisplay_ssh_disable_password_auth | bool
+  block:
+    - name: Home-Verzeichnis des Ansible-Users ermitteln
+      getent:
+        database: passwd
+        key: "{{ ansible_user }}"
+
+    - name: authorized_keys des Ansible-Users ansehen
+      stat:
+        path: "{{ camdisplay_ssh_authorized_keys_path | default(getent_passwd[ansible_user][4] ~ '/.ssh/authorized_keys') }}"
+      register: camdisplay_authorized_keys
+
+    - name: Abbruch, wenn das Abschalten des Passwort-Logins aussperren wuerde
+      assert:
+        that:
+          - camdisplay_authorized_keys.stat.exists
+          - (camdisplay_authorized_keys.stat.size | default(0)) > 0
+          - ansible_password is not defined
+          - ansible_ssh_pass is not defined
+        fail_msg: >-
+          Das Passwort-Login wuerde abgeschaltet, aber fuer "{{ ansible_user }}" ist kein
+          SSH-Key hinterlegt (leere/fehlende authorized_keys) oder Ansible verbindet
+          per Passwort. Erst einen Key einrichten (ssh-copy-id) und per Key verbinden -
+          oder bewusst -e camdisplay_ssh_disable_password_auth=false setzen.
+          Liegt authorized_keys woanders, den Pfad in camdisplay_ssh_authorized_keys_path angeben.
+
+- name: SSH-Haertung als Drop-in einspielen und auf Wirksamkeit pruefen
+  block:
+    - name: /etc/ssh/sshd_config.d anlegen
+      file:
+        path: /etc/ssh/sshd_config.d
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: SSH-Drop-in schreiben (Praefix 00, damit der erste Wert gewinnt)
+      template:
+        src: sshd-hardening.conf.j2
+        dest: /etc/ssh/sshd_config.d/00-camdisplay-hardening.conf
+        owner: root
+        group: root
+        mode: "0644"
+      register: camdisplay_sshd_dropin
+
+    - name: Wirksame sshd-Konfiguration auslesen (sshd -T)
+      command: sshd -T
+      register: camdisplay_sshd_effective
+      changed_when: false
+
+    - name: Pruefen, dass die Werte wirklich gelten (kein frueherer Wert hat gewonnen)
+      assert:
+        that:
+          - "'permitrootlogin no' in camdisplay_sshd_effective.stdout_lines"
+          - "'x11forwarding no' in camdisplay_sshd_effective.stdout_lines"
+          - "'clientaliveinterval 300' in camdisplay_sshd_effective.stdout_lines"
+          - "'clientalivecountmax 2' in camdisplay_sshd_effective.stdout_lines"
+          - >-
+            not (camdisplay_ssh_disable_password_auth | bool) or
+            ('passwordauthentication no' in camdisplay_sshd_effective.stdout_lines and
+             'kbdinteractiveauthentication no' in camdisplay_sshd_effective.stdout_lines)
+
+    - name: sshd neu laden (bestehende Verbindungen bleiben)
+      systemd:
+        name: ssh
+        state: reloaded
+      when: camdisplay_sshd_dropin is changed
+
+  rescue:
+    # sshd hat die Datei noch nicht geladen (Reload erst nach erfolgreicher
+    # Pruefung) - entfernen, damit auch ein spaeterer Neustart von sshd nicht
+    # an einer fehlerhaften Datei scheitert.
+    - name: Fehlerhaftes SSH-Drop-in wieder entfernen
+      file:
+        path: /etc/ssh/sshd_config.d/00-camdisplay-hardening.conf
+        state: absent
+
+    - name: Abbruch mit Hinweis
+      fail:
+        msg: >-
+          Die SSH-Haertung wurde NICHT uebernommen (Drop-in entfernt, sshd unveraendert).
+          Ursache: sshd hat die Datei abgelehnt (z.B. OpenSSH aelter als 8.7 kennt
+          KbdInteractiveAuthentication nicht - dann -e camdisplay_ssh_disable_password_auth=false)
+          oder ein anderer Eintrag ueberstimmt die Werte (Include steht nicht am Anfang von
+          sshd_config). Details siehe die vorherige Fehlermeldung.
+
+# ------------------------------------------------------------- Bluetooth
+# Zusaetzlich zum abgeschalteten Dienst das Funkmodul selbst per dtoverlay
+# aus - schliesst die Angriffsflaeche auf Hardware-Ebene. Wie beim WLAN gilt
+# die config.txt-Aenderung erst nach einem Reboot, den auch kein
+# /var/run/reboot-required ausloest.
+- name: Bluetooth-Funkmodul per dtoverlay deaktivieren
+  lineinfile:
+    path: /boot/firmware/config.txt
+    regexp: "^dtoverlay=disable-bt"
+    line: "dtoverlay=disable-bt"
+    insertafter: '^\[all\]'
+  register: camdisplay_disable_bt
+
+- name: Reboot nach dtoverlay=disable-bt (config.txt)
+  reboot:
+    msg: "Reboot nach Deaktivierung von Bluetooth"
+  when: camdisplay_disable_bt is changed

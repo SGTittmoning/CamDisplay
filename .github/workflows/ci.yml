@@ -25,7 +25,7 @@ jobs:
       - name: shellcheck
         run: |
           command -v shellcheck || { sudo apt-get update && sudo apt-get install -y shellcheck; }
-          shellcheck -S warning ansible/files/*.sh systemd/*.sh tests/run-tests.sh tools/*.sh
+          shellcheck -S warning ansible/files/*.sh systemd/*.sh tests/*.sh tools/*.sh
 
   tests:
     if: github.event.repository.private == false
@@ -53,6 +53,10 @@ jobs:
         run: |
           ansible-playbook -i ansible/inventory.yml.dist ansible/install.yml --syntax-check
           ansible-playbook -i ansible/inventory.yml.dist ansible/maintain.yml --syntax-check
+      - name: Install nftables and sshd (needed by the hardening tests)
+        run: sudo apt-get update && sudo apt-get install -y nftables openssh-server
+      - name: Ansible tests (firewall syntax, effective sshd settings, lock-out safeguards)
+        run: tests/test-ansible.sh
 
   gitleaks:
     if: github.event.repository.private == false

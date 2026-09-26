@@ -42,6 +42,14 @@ Installs `ffmpeg` + `libegl1`/`libegl-mesa0`, creates the unprivileged service u
 
 The reboot guard is camera-aware: while the camera is unreachable it first retries every 2 minutes without rebooting, and reboots anyway after 3 failed attempts in a row (a reboot rebuilds DHCP/network on the Pi); with the camera reachable it reboots right away. At most 5 reboots in total, after that only slow retries. Details in the [top-level README](../README.md#files).
 
+### OS hardening (optional)
+
+```bash
+ansible-playbook -i inventory.yml install.yml --limit <host> -e camdisplay_enable_hardening=true
+```
+
+Applies `tasks/hardening.yml`: a default-deny-inbound `nftables` firewall (SSH stays open), avahi and Bluetooth off, SSH hardening including key-only login. Details, and how it avoids locking you out, are in the [top-level README](../README.md#os-hardening-optional). The password-login part refuses to run unless the Ansible user has an `authorized_keys` entry (override the path with `camdisplay_ssh_authorized_keys_path`); keep password login with `-e camdisplay_ssh_disable_password_auth=false`.
+
 ### Read-only root filesystem
 
 Once you've confirmed the display works, harden it against unclean power-offs:
@@ -89,6 +97,7 @@ Note that `camdisplay.service` itself picks its output connector the same way, b
 | `install.yml` / `maintain.yml` | Entry-point playbooks |
 | `tasks/base.yml` | Packages, groups, timezone, WiFi removal/disable |
 | `tasks/maintenance_scripts.yml` | Deploys the `/root/bin/` scripts |
+| `tasks/hardening.yml` | Optional OS hardening: firewall, avahi/Bluetooth off, SSH (see above) |
 | `tasks/overlay.yml` | Read-only root FS + boot partition (see above) |
 | `tasks/kiosk_service.yml` | Start wrapper, `stream.env`, systemd units, service (re)start |
 | `templates/` | Jinja2 templates for the systemd units and `stream.env` |

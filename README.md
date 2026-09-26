@@ -163,6 +163,16 @@ sudo reboot
 
 With both active, nothing on disk changes at runtime — updates need a small dance to temporarily lift the read-only state, apply them, and lock it back down. [`camdisplay-writable.sh`](systemd/camdisplay-writable.sh) (manual config edits) and [`camdisplay-update.sh`](systemd/camdisplay-update.sh) (apt upgrades) handle that; drop them in `/root/bin/` for when Ansible access isn't available. Their state files deliberately live on the boot partition (never covered by the root overlay) so they survive the reboot in the middle of the process. If an upgrade fails halfway (e.g. no network), `camdisplay-update.sh` restores the protected state (boot partition read-only + overlay) and ends the cycle instead of leaving the device silently writable; start over with `begin`.
 
+### OS hardening (optional)
+
+Off by default; enable with `-e camdisplay_enable_hardening=true` (Ansible, see [`ansible/README.md`](ansible/README.md)). It gives an always-on device on a shared network a much smaller attack surface:
+
+- **Firewall (`nftables`)**: everything inbound is dropped except loopback, established connections, basic ICMP and **SSH**. Outbound stays open (camera stream, reachability probe). The rules are syntax-checked before they are installed.
+- **avahi (mDNS) and Bluetooth off**: services masked and the Bluetooth radio disabled via `dtoverlay=disable-bt` (one reboot). Afterwards `<name>.local` names no longer resolve.
+- **SSH**: no root login, no X11 forwarding, dead sessions dropped after ~10 minutes, and **key-only login** (password and keyboard-interactive off).
+
+Being locked out is the risk, so the playbook guards against it: password login is only switched off if the Ansible user actually has an `authorized_keys` entry and Ansible connects by key; the SSH settings go into a drop-in named `00-…` (sshd takes the *first* value per keyword, so it also beats later drop-ins such as the ones the Raspberry Pi Imager writes), and afterwards the *effective* configuration is read back with `sshd -T` — if a value didn't take effect, the drop-in is removed again and the run fails before sshd ever loads it. Try it on a test device first. Needs OpenSSH ≥ 8.7 (Bookworm or newer) for the password part; on older systems use `-e camdisplay_ssh_disable_password_auth=false`.
+
 ---
 
 ## Setup B: X11 + autologin (fallback)

@@ -1,0 +1,17 @@
+# Von Ansible verwaltet (camdisplay, tasks/hardening.yml).
+#
+# Als Drop-in mit "00-" im Namen: sshd nimmt pro Schluesselwort den ERSTEN
+# Wert, und "Include /etc/ssh/sshd_config.d/*.conf" steht in der Hauptdatei
+# vorn und wird alphabetisch abgearbeitet. So gewinnen diese Werte auch gegen
+# spaetere Drop-ins (z.B. vom Raspberry Pi Imager) und gegen die Hauptdatei -
+# ein lineinfile in sshd_config koennte von einem frueheren Drop-in ueberstimmt
+# werden. Ob die Werte wirklich wirksam sind, prueft das Playbook danach mit
+# "sshd -T".
+PermitRootLogin no
+X11Forwarding no
+ClientAliveInterval 300
+ClientAliveCountMax 2
+{% if camdisplay_ssh_disable_password_auth | bool %}
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+{% endif %}
