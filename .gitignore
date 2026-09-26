@@ -1,2 +1,3 @@
 ansible/inventory.yml
 ansible/*.retry
+CLAUDE.md
