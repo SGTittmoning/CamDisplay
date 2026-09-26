@@ -1,8 +1,9 @@
 [Unit]
-Description=5 minutes after boot, check CamDisplay is stable and reset the reboot counter
+Description=Every 5 minutes, check CamDisplay has been running stably and reset the reboot counter
 
 [Timer]
 OnBootSec=5min
+OnUnitActiveSec=5min
 AccuracySec=30s
 
 [Install]

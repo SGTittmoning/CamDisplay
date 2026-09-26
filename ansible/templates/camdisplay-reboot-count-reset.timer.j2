@@ -1,8 +1,9 @@
 [Unit]
-Description=5 Minuten nach Boot pruefen ob CamDisplay stabil laeuft, Reboot-Zaehler zuruecksetzen
+Description=Alle 5 Minuten pruefen ob CamDisplay stabil laeuft, dann Reboot-Zaehler zuruecksetzen
 
 [Timer]
 OnBootSec=5min
+OnUnitActiveSec=5min
 AccuracySec=30s
 
 [Install]
