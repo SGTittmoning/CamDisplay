@@ -170,11 +170,11 @@ With both active, nothing on disk changes at runtime — updates need a small da
 
 ### Hardware watchdog
 
-The Ansible playbook enables systemd's hardware watchdog by default (`RuntimeWatchdogSec=10` in a `system.conf.d` drop-in, plus `RebootWatchdogSec=2min` so a hung shutdown ends in a hard reset). systemd keeps feeding the SoC's watchdog; if the whole system hangs (kernel panic, blocked PID 1, I/O stall) the feeding stops and the hardware reboots the device — even when no process is responsive any more. The Raspberry Pi watchdog (`bcm2835-wdt`) accepts at most about 15 seconds, which is why the value is validated to 2–15 s. Nothing is set if `/dev/watchdog` doesn't exist. It does **not** catch a hung `ffplay` on an otherwise healthy system — that is what `-autoexit`/`-rw_timeout` and the reboot guard are for. Turn it off with `-e camdisplay_enable_watchdog=false`; manual setup:
+The Ansible playbook enables systemd's hardware watchdog by default (`RuntimeWatchdogSec=10` in a `system.conf.d` drop-in). systemd keeps feeding the SoC's watchdog; if the whole system hangs (kernel panic, blocked PID 1, I/O stall) the feeding stops and the hardware reboots the device — even when no process is responsive any more. The Raspberry Pi watchdog (`bcm2835-wdt`) accepts at most about 15 seconds, which is why the value is validated to 2–15 s. Nothing is set if `/dev/watchdog` doesn't exist. `RebootWatchdogSec` (the timeout during shutdown) is deliberately not set: values above the Pi's ~15 s limit are expected to be rejected by the driver (not verified on hardware), so a hung *shutdown* is not covered. It does **not** catch a hung `ffplay` on an otherwise healthy system — that is what `-autoexit`/`-rw_timeout` and the reboot guard are for. Turn it off with `-e camdisplay_enable_watchdog=false`; manual setup:
 
 ```bash
 sudo mkdir -p /etc/systemd/system.conf.d
-printf '[Manager]\nRuntimeWatchdogSec=10\nRebootWatchdogSec=2min\n' | sudo tee /etc/systemd/system.conf.d/10-camdisplay-watchdog.conf
+printf '[Manager]\nRuntimeWatchdogSec=10\n' | sudo tee /etc/systemd/system.conf.d/10-camdisplay-watchdog.conf
 sudo systemctl daemon-reexec
 systemctl show -p RuntimeWatchdogUSec   # expect 10s
 ```
@@ -187,7 +187,7 @@ Off by default; enable with `-e camdisplay_enable_hardening=true` (Ansible, see 
 - **avahi (mDNS) and Bluetooth off**: services masked and the Bluetooth radio disabled via `dtoverlay=disable-bt` (one reboot). Afterwards `<name>.local` names no longer resolve.
 - **SSH**: no root login, no X11 forwarding, dead sessions dropped after ~10 minutes, and **key-only login** (password and keyboard-interactive off).
 
-Being locked out is the risk, so the playbook guards against it: password login is only switched off if the Ansible user actually has an `authorized_keys` entry and Ansible connects by key; the SSH settings go into a drop-in named `00-…` (sshd takes the *first* value per keyword, so it also beats later drop-ins such as the ones the Raspberry Pi Imager writes), and afterwards the *effective* configuration is read back with `sshd -T` — if a value didn't take effect, the drop-in is removed again and the run fails before sshd ever loads it. Try it on a test device first. Needs OpenSSH ≥ 8.7 (Bookworm or newer) for the password part; on older systems use `-e camdisplay_ssh_disable_password_auth=false`.
+Being locked out is the risk, so the playbook guards against it: it refuses to run if Ansible connects as `root` (root login gets disabled) or if `sshd` doesn't listen on port 22 (the only port the firewall opens); password login is only switched off if the Ansible user actually has an `authorized_keys` entry and Ansible connects by key; the SSH settings go into a drop-in named `00-…` (sshd takes the *first* value per keyword, so it also beats later drop-ins such as the ones the Raspberry Pi Imager writes), and afterwards the *effective* configuration is read back with `sshd -T` — if a value didn't take effect, the drop-in is removed again and the run fails before sshd ever loads it. Try it on a test device first. Needs OpenSSH ≥ 8.7 (Bookworm or newer) for the password part; on older systems use `-e camdisplay_ssh_disable_password_auth=false`.
 
 ### Verifying an installation
 

@@ -20,6 +20,32 @@
 # Reboots (Bluetooth per dtoverlay) stehen bewusst am Ende dieser Datei, aber
 # noch vor dem Start des Dienstes (siehe Reihenfolge in install.yml).
 
+# ------------------------------------------------- Aussperr-Vorpruefung
+# Beides wuerde nach der Haertung den Zugang kappen und laesst sich vorher
+# erkennen. (Nicht erkennbar: "ansible-playbook -k" - die Passwort-Abfrage steht in
+# keiner Host-Variable. Wer per Passwort verbindet, setzt vorher einen Key auf.)
+- name: Abbruch, wenn der Ansible-User root ist (die Haertung verbietet Root-Login)
+  assert:
+    that:
+      - (ansible_user | default('')) != 'root'
+    fail_msg: >-
+      Ansible verbindet als root, die Haertung setzt aber "PermitRootLogin no" - der
+      naechste Lauf kaeme nicht mehr rein. Einen normalen Benutzer mit sudo verwenden
+      (ansible_user) oder die Haertung nicht aktivieren.
+
+- name: Auf welchen Ports lauscht sshd? (die Firewall erlaubt nur Port 22)
+  command: sshd -T
+  register: camdisplay_sshd_before
+  changed_when: false
+
+- name: Abbruch, wenn sshd nicht auf Port 22 lauscht (die Firewall wuerde ihn aussperren)
+  assert:
+    that:
+      - "'port 22' in camdisplay_sshd_before.stdout_lines"
+    fail_msg: >-
+      sshd lauscht nicht auf Port 22, die Firewall (files/nftables.conf) laesst aber nur
+      Port 22 ein. Erst die Regel in files/nftables.conf an den SSH-Port anpassen.
+
 # ---------------------------------------------------------------- Firewall
 - name: nftables-Paket installieren
   apt:

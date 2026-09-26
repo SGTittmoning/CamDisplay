@@ -1,0 +1,17 @@
+# Standardwerte fuer install.yml. Bewusst NICHT als "vars:" im Play: Play-Variablen
+# haben in Ansible Vorrang vor Inventar-Variablen, ein Eintrag im Inventar
+# (pro Host oder Gruppe) wuerde dann stillschweigend ignoriert. Hier haben Host-
+# und Gruppenvariablen aus dem Inventar sowie -e Vorrang.
+camdisplay_timezone: Europe/Berlin
+camdisplay_enable_overlay: false
+camdisplay_service_user: camdisplay
+# Opt-in: Firewall (nftables), avahi/Bluetooth aus, SSH-Haertung - siehe
+# tasks/hardening.yml. Erst am Testgeraet ausprobieren (Aussperr-Risiko).
+camdisplay_enable_hardening: false
+# Teil der Haertung: Passwort-Login abschalten (nur Key). Wird nur
+# umgesetzt, wenn der Ansible-User einen Key hat.
+camdisplay_ssh_disable_password_auth: true
+# Hardware-Watchdog (systemd RuntimeWatchdogSec), siehe tasks/watchdog.yml.
+# Der Pi kann hoechstens ca. 15 Sekunden.
+camdisplay_enable_watchdog: true
+camdisplay_watchdog_sec: 10

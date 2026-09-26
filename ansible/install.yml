@@ -26,20 +26,8 @@
 - hosts: camdisplay
   become: yes
 
-  vars:
-    camdisplay_timezone: Europe/Berlin
-    camdisplay_enable_overlay: false
-    camdisplay_service_user: camdisplay
-    # Opt-in: Firewall (nftables), avahi/Bluetooth aus, SSH-Haertung - siehe
-    # tasks/hardening.yml. Erst am Testgeraet ausprobieren (Aussperr-Risiko).
-    camdisplay_enable_hardening: false
-    # Teil der Haertung: Passwort-Login abschalten (nur Key). Wird nur
-    # umgesetzt, wenn der Ansible-User einen Key hat.
-    camdisplay_ssh_disable_password_auth: true
-    # Hardware-Watchdog (systemd RuntimeWatchdogSec), siehe tasks/watchdog.yml.
-    # Der Pi kann hoechstens ca. 15 Sekunden.
-    camdisplay_enable_watchdog: true
-    camdisplay_watchdog_sec: 10
+  # Standardwerte der camdisplay_*-Variablen: group_vars/all.yml (bewusst nicht als
+  # Play-"vars:", sonst wuerden gleichnamige Inventar-Eintraege ignoriert).
 
   tasks:
 

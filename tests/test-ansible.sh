@@ -145,7 +145,7 @@ fi
 echo "== Hardware-Watchdog =="
 W="$A/tasks/watchdog.yml"
 render "$A/templates/watchdog.conf.j2" "$WORK/wd.conf" '{"camdisplay_watchdog_sec": 10}'
-check "Drop-in: RuntimeWatchdogSec=10 und RebootWatchdogSec=2min" "RuntimeWatchdogSec=10 RebootWatchdogSec=2min" "$(grep -E '^(RuntimeWatchdogSec|RebootWatchdogSec)=' "$WORK/wd.conf" | paste -sd' ')"
+check "Drop-in: RuntimeWatchdogSec=10, kein RebootWatchdogSec (ueber dem Limit des Pi)" "RuntimeWatchdogSec=10" "$(grep -E '^(RuntimeWatchdogSec|RebootWatchdogSec)=' "$WORK/wd.conf" | paste -sd' ')"
 render "$A/templates/watchdog.conf.j2" "$WORK/wd.conf" '{"camdisplay_watchdog_sec": 12}'
 check "Drop-in folgt camdisplay_watchdog_sec" "RuntimeWatchdogSec=12" "$(grep -E '^RuntimeWatchdogSec=' "$WORK/wd.conf")"
 
@@ -183,6 +183,43 @@ else
   rc=$(play "$WORK/wd_full.yml")
   check "ohne /dev/watchdog: Hinweis, nichts wird angefasst, Lauf endet erfolgreich" "0/ja" "$rc/$(grep -q 'wird nicht eingerichtet' "$WORK/play.log" && echo ja || echo nein)"
 fi
+
+echo "== Haertung: Aussperr-Vorpruefung =="
+extract "$A/tasks/hardening.yml" "Abbruch, wenn der Ansible-User root ist" "Auf welchen Ports" > "$WORK/rootcheck.yml"
+printf -- '- hosts: localhost\n  connection: local\n  gather_facts: no\n  tasks:\n    - import_tasks: %s\n' "$WORK/rootcheck.yml" > "$WORK/rootcheck_pb.yml"
+check "Ansible-User root -> Abbruch"        "nonzero" "$([ "$(play "$WORK/rootcheck_pb.yml" -e ansible_user=root)" -ne 0 ] && echo nonzero || echo zero)"
+check "Ansible-User normal -> weiter"        "0"       "$(play "$WORK/rootcheck_pb.yml" -e ansible_user=pi)"
+check "ansible_user nicht gesetzt -> weiter" "0"       "$(play "$WORK/rootcheck_pb.yml")"
+check "Firewall laesst MLD-Abfragen durch (Syntax bleibt gueltig, s.o.)" "ja" "$(grep -q 'mld-listener-query' "$A/files/nftables.conf" && echo ja || echo nein)"
+
+echo "== Vorrang: Inventar-Werte muessen die Standardwerte ueberstimmen =="
+# Play-"vars:" haetten Vorrang vor Inventar-Variablen; die Standardwerte stehen deshalb in
+# group_vars/all.yml. Getestet wird mit einem Mini-Playbook im selben Aufbau (Playbook +
+# group_vars daneben, Inventar mit Host-Variablen).
+mkdir -p "$WORK/prec/group_vars"
+cp "$A/group_vars/all.yml" "$WORK/prec/group_vars/all.yml"
+cat > "$WORK/prec/inv.yml" <<'EOF'
+camdisplay:
+  hosts:
+    h1:
+      ansible_connection: local
+      camdisplay_enable_hardening: true
+      camdisplay_enable_watchdog: false
+      camdisplay_watchdog_sec: 7
+    h2:
+      ansible_connection: local
+EOF
+cat > "$WORK/prec/pb.yml" <<'EOF'
+- hosts: camdisplay
+  gather_facts: no
+  tasks:
+    - debug:
+        msg: "{{ inventory_hostname }} hardening={{ camdisplay_enable_hardening }} watchdog={{ camdisplay_enable_watchdog }} sec={{ camdisplay_watchdog_sec }} user={{ camdisplay_service_user }}"
+EOF
+ansible-playbook -i "$WORK/prec/inv.yml" "$WORK/prec/pb.yml" > "$WORK/prec/out.log" 2>&1
+check "Host-Variable aus dem Inventar gewinnt (Haertung an, Watchdog aus, 7 s)" "ja" "$(grep -q 'h1 hardening=True watchdog=False sec=7 user=camdisplay' "$WORK/prec/out.log" && echo ja || echo nein)"
+check "Host ohne Eintrag bekommt die Standardwerte" "ja" "$(grep -q 'h2 hardening=False watchdog=True sec=10 user=camdisplay' "$WORK/prec/out.log" && echo ja || echo nein)"
+check "install.yml setzt keine camdisplay_*-Werte als Play-vars (wuerden das Inventar uebersteuern)" "0" "$(grep -cE '^    camdisplay_[a-z_]+:' "$A/install.yml")"
 
 echo
 echo "Ergebnis: $pass ok, $fail Fehler, $skipped uebersprungen"

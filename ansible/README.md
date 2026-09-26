@@ -103,6 +103,7 @@ On the device, after `install.yml`: `sudo tools/verify-install.sh` (add `--expec
 | Path | Purpose |
 |---|---|
 | `install.yml` / `maintain.yml` | Entry-point playbooks |
+| `group_vars/all.yml` | Defaults of all `camdisplay_*` options. Deliberately not `vars:` in the play: play variables would override inventory values |
 | `tasks/base.yml` | Locale, time zone, hostname, service user, packages, saved Wi-Fi profiles removed |
 | `tasks/maintenance_scripts.yml` | Deploys the `/root/bin/` scripts |
 | `tasks/watchdog.yml` | Hardware watchdog via systemd (on by default) |
