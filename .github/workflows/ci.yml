@@ -1,0 +1,76 @@
+name: CI
+
+# Kostenfrei nur bei OEFFENTLICHEN Repositories: GitHub-gehostete Standard-
+# Runner (ubuntu-latest) haben dort kein Minutenlimit. Bei privaten Repos
+# zaehlt jede Minute gegen ein Kontingent. Deshalb laufen alle Jobs nur,
+# solange das Repo oeffentlich ist, und es werden ausschliesslich Standard-
+# Runner und kostenlose Werkzeuge verwendet (keine "larger runners", keine
+# lizenzpflichtigen Actions).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  shellcheck:
+    if: github.event.repository.private == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - name: shellcheck
+        run: |
+          command -v shellcheck || { sudo apt-get update && sudo apt-get install -y shellcheck; }
+          shellcheck -S warning ansible/files/*.sh systemd/*.sh tests/run-tests.sh
+
+  tests:
+    if: github.event.repository.private == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - name: Regression tests for the maintenance scripts (stubbed system commands, no hardware)
+        run: tests/run-tests.sh
+
+  ansible:
+    if: github.event.repository.private == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install ansible-lint
+        run: pip install "ansible-lint==26.9.0"
+      - name: ansible-lint
+        run: ansible-lint ansible/install.yml ansible/maintain.yml
+      - name: Syntax check
+        run: |
+          ansible-playbook -i ansible/inventory.yml.dist ansible/install.yml --syntax-check
+          ansible-playbook -i ansible/inventory.yml.dist ansible/maintain.yml --syntax-check
+
+  gitleaks:
+    if: github.event.repository.private == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      # CLI statt gitleaks-action: die Action verlangt fuer Repos in einer
+      # GitHub-Organisation einen kostenpflichtigen Lizenzschluessel, das CLI
+      # nicht. Version fest gepinnt, Pruefsumme wird verifiziert.
+      - name: gitleaks (full history)
+        env:
+          GITLEAKS_VERSION: "8.30.1"
+          GITLEAKS_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+        run: |
+          curl -sSfL -o gitleaks.tgz "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  gitleaks.tgz" | sha256sum -c -
+          tar xzf gitleaks.tgz gitleaks
+          ./gitleaks detect --source . --redact --no-banner --exit-code 1
