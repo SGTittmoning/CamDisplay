@@ -21,17 +21,26 @@
 #
 # get_overlay_now/get_bootro_now: 0 = aktiv, 1 = nicht aktiv (raspi-config
 # Konvention). get_overlay_now prueft nur, ob "overlayroot=tmpfs" beim
-# aktuellen Boot in der Kernel-Cmdline stand (siehe Kommentar unten) -
-# fuer die Entscheidung "muss ich enable_overlayfs aufrufen" ist deshalb
-# stattdessen der overlayroot-Paketstatus das verlaesslichere Signal
-# (beobachtet: Flag stand bereits im Image, Paket fehlte, get_overlay_now
-# meldete faelschlich "aktiv").
+# aktuellen Boot in der Kernel-Cmdline stand - der Paketstatus allein ist
+# aber auch nicht ausreichend. Beide Signale fehlen je einzeln:
+#  - nur get_overlay_now: beobachtet, dass das Flag bereits im Image stand,
+#    das Paket aber fehlte - get_overlay_now meldete faelschlich "aktiv".
+#  - nur Paketstatus: nach "camdisplay-writable.sh rw" (Overlay aus, Paket
+#    bleibt installiert) wuerde ein erneuter Lauf enable_overlayfs NICHT
+#    aufrufen, das Geraet bliebe unbemerkt beschreibbar.
+# Deshalb wird enable_overlayfs aufgerufen, wenn das Paket fehlt ODER das
+# Overlay beim aktuellen Boot nicht aktiv ist.
 
 - name: overlayroot Paketstatus ermitteln
   command: dpkg-query -W -f='${Status}' overlayroot
   register: camdisplay_overlayroot_pkg
   changed_when: false
   failed_when: false
+
+- name: Overlay-Status (aktueller Boot) ermitteln
+  command: raspi-config nonint get_overlay_now
+  register: camdisplay_overlay_live
+  changed_when: false
 
 - name: Bootro-Status ermitteln
   command: raspi-config nonint get_bootro_now
@@ -45,7 +54,7 @@
 
 - name: Overlay-Root aktivieren (installiert bei Bedarf das overlayroot-Paket)
   command: raspi-config nonint enable_overlayfs
-  when: "'install ok installed' not in camdisplay_overlayroot_pkg.stdout"
+  when: "'install ok installed' not in camdisplay_overlayroot_pkg.stdout or camdisplay_overlay_live.stdout | trim != '0'"
   register: camdisplay_overlay_enabled
 
 - name: Reboot fuer Bootro/Overlay-Aktivierung
