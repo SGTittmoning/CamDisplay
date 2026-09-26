@@ -25,11 +25,18 @@
 #                            "-timeout" verwenden: bei RTMP bedeutet das
 #                            "auf eingehende Verbindungen warten" und macht
 #                            ffplay zum Server.
-#  -fflags +nobuffer         geringe Latenz. Das "+" ist wichtig: "-nobuffer"
-#                            schaltet das Flag AUS.
-#  -flags low_delay          dito, fuer den Decoder
+#  -flags low_delay          geringe Latenz im Decoder
 #  -framedrop                lieber Bilder verwerfen als hinterherzuhinken
 #  -analyzeduration 1        minimale Stream-Analyse beim Start (Startzeit)
+#
+# Bewusst NICHT gesetzt: -fflags nobuffer. Das Flag klingt nach "geringere
+# Latenz", aber gemessen (ffplay 6.1, RTMP-Teststream): mit nobuffer, egal ob
+# "nobuffer" oder "+nobuffer" und auch mit groesserem analyzeduration, kommen
+# GAR KEINE Bilder an (ffplay-Statistik "nan M-V: nan" statt einer laufenden
+# Zeitposition). Der frueher eingesetzte Wert "-nobuffer" war ein No-op (das
+# Praefix "-" schaltet das Flag aus) und lief jahrelang problemlos. Wer es
+# mit der echten Kamera ausprobieren will: tools/check-camera.sh misst es
+# (STREAM_OPTS="-fflags +nobuffer" in stream.env, nur wenn dort Bilder kommen).
 #
 # Optionale Zusatz-Optionen ueber STREAM_OPTS in stream.env, z.B. fuer RTSP:
 #   STREAM_OPTS="-rtsp_transport tcp"
@@ -72,7 +79,6 @@ rc=0
   -rw_timeout 5000000 \
   -fs \
   -analyzeduration 1 \
-  -fflags +nobuffer \
   -flags low_delay \
   -framedrop \
   -an -nostats -loglevel error \

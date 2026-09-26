@@ -78,10 +78,11 @@ WantedBy=multi-user.target
 |---|---|
 | `-autoexit` | Exit when the stream ends. Without it `ffplay` stays open on the last frame, so neither `Restart=always` nor the reboot guard ever fires and the display just freezes. |
 | `-rw_timeout 5000000` | Socket I/O timeout in µs: exit if the connection hangs without a clean end (camera or switch gone). Measured with ffmpeg 6.1: `ffplay` exits after roughly 3× this value (~15 s). **Don't use `-timeout` instead** — for RTMP that option means "wait for an *incoming* connection" and turns `ffplay` into a server. |
-| `-fflags +nobuffer` | Low latency. The `+` matters: `-nobuffer` *clears* the flag. |
 | `-flags low_delay -framedrop` | Low-latency decoding; drop frames rather than fall behind. |
 | `-analyzeduration 1` | Minimal stream analysis at startup. |
 | `-an -nostats -loglevel error` | No audio, quiet output. |
+
+**`-fflags nobuffer` is deliberately not used.** It sounds like "lower latency", but measured with ffplay 6.1 against an RTMP test stream it stops *all* video (the statistics show `nan M-V: nan` instead of a running position), in either spelling (`nobuffer` or `+nobuffer`) and even with a longer `-analyzeduration`. The setting used before, `-fflags -nobuffer`, was a no-op (the `-` prefix *clears* a flag) and ran for years without problems. If you want to try it against your real camera, `tools/check-camera.sh` measures whether frames arrive with it, and only then set `STREAM_OPTS="-fflags +nobuffer"`.
 
 `ffplay` also exits with status 0 when it can't connect, so the unit uses `Restart=always` (not `on-failure`). For RTSP sources add `STREAM_OPTS="-rtsp_transport tcp"` to `stream.env` (below) — it is deliberately not built in, because `ffplay` aborts on options the input doesn't know (`Option rtsp_transport not found`), which would kill the display for RTMP URLs. The freeze-detection timeout was verified with RTMP only, not with a real RTSP source.
 
@@ -207,7 +208,7 @@ ERRORCOUNTER=0
 while true; do
     # same flags as Setup A (see the table there); add -rtsp_transport tcp for RTSP
     ffplay -autoexit -rw_timeout 5000000 -fs -analyzeduration 1 \
-        -fflags +nobuffer -flags low_delay -framedrop -an -nostats -loglevel error \
+        -flags low_delay -framedrop -an -nostats -loglevel error \
         "$STREAM_URL" >> "$LOGFILE" 2>&1
 
     # Only count failures while the camera is reachable: rebooting the Pi does
