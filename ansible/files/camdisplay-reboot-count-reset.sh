@@ -60,8 +60,12 @@ bootro_now() { raspi-config nonint get_bootro_now; }
 was_ro=0
 [ "$(bootro_now)" -eq 0 ] && was_ro=1
 [ "$was_ro" -eq 1 ] && mount -o remount,rw "$BOOT_DIR"
-rm -f "$COUNT_FILE"
+rm_rc=0
+rm -f "$COUNT_FILE" || rm_rc=1
+# Auch nach einem Fehler die Boot-Partition wieder schuetzen
 [ "$was_ro" -eq 1 ] && mount -o remount,ro "$BOOT_DIR"
 
-exit 0   # verhindert, dass "was_ro=0" (letzte Zeile liefert dann 1) das Skript mit Exit-Code 1
-         # beendet und den Type=oneshot-Service faelschlich als failed markiert
+# Exit 0, wenn alles klappte (sonst liefert "was_ro=0" als letzte Zeile 1 und der
+# Type=oneshot-Service wuerde faelschlich als failed markiert); 1 nur, wenn der Zaehler
+# nicht geloescht werden konnte.
+exit "$rm_rc"

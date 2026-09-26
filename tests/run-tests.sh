@@ -149,6 +149,9 @@ if is_root; then skip "Zaehler nicht schreibbar -> KEIN Reboot" "als root nicht 
 else
   new_env; chmod 555 "$WORK/boot"; BOOTRO=1 guard "$LIVE"; chmod 755 "$WORK/boot"
   check "echter Fehler (Zaehler nicht schreibbar): Abbruch, KEIN Reboot" "nein/nonzero" "$(called reboot)/$([ "$G_RC" -ne 0 ] && echo nonzero || echo zero)"
+  new_env; chmod 555 "$WORK/boot"; BOOTRO=0 guard "$LIVE"; chmod 755 "$WORK/boot"
+  check "Zaehler nicht schreibbar bei read-only Boot: Partition wird wieder read-only gesetzt, KEIN Reboot" "ja/nein/nonzero" \
+    "$(grep -q 'remount,ro' "$STUB_LOG" && echo ja || echo nein)/$(called reboot)/$([ "$G_RC" -ne 0 ] && echo nonzero || echo zero)"
   new_env; chmod 555 "$WORK/run"; BOOTRO=1 guard "$DEAD"; chmod 755 "$WORK/run"
   check "/run nicht schreibbar: Retry wird trotzdem eingeplant" "0/ja/nein" "$G_RC/$(called systemd-run)/$(called reboot)"
 fi
@@ -164,6 +167,11 @@ for spec in \
   "rtsp://127.0.0.1/stream|127.0.0.1:554" \
   "rtmp://127.0.0.1/live|127.0.0.1:1935" \
   "rtmp://[::1]:$DEAD_PORT/x|::1:$DEAD_PORT"; do
+  # Default-Port 1935 ist fest: lauscht dort gerade etwas (z.B. ein lokaler RTMP-Teststream),
+  # ist das Ziel erreichbar und der Fall nicht pruefbar.
+  if [ "${spec##*|}" = "127.0.0.1:1935" ] && (exec 3<>/dev/tcp/127.0.0.1/1935) 2>/dev/null; then
+    skip "URL-Auswertung: Ziel 127.0.0.1:1935" "Port 1935 ist auf diesem Rechner belegt"; continue
+  fi
   new_env; BOOTRO=1 guard "${spec%%|*}"
   check "URL-Auswertung: Ziel ${spec##*|}" "ja" "$(grep -q "Kamera ${spec##*|} nicht erreichbar" "$STUB_LOG" && echo ja || echo nein)"
 done
@@ -201,6 +209,14 @@ reset() { # HAVE_COUNT HAVE_UNREACH ; Umgebung: STUB_ENTER STUB_INACTIVE BOOTRO
     bash "$FILES/camdisplay-reboot-count-reset.sh" >/dev/null 2>&1; R_RC=$?
   R_STATE="$([ -f "$WORK/boot/.camdisplay-reboot-count" ] && echo da || echo weg)/$([ -f "$WORK/run/camdisplay-unreachable-count" ] && echo da || echo weg)"
 }
+if ! is_root; then
+  new_env; echo 3 > "$WORK/boot/.camdisplay-reboot-count"; chmod 555 "$WORK/boot"
+  PATH="$STUBS:$PATH" CAMDISPLAY_BOOT_DIR="$WORK/boot" CAMDISPLAY_RUN_DIR="$WORK/run" CAMDISPLAY_UPTIME_FILE="$WORK/uptime" STUB_ENTER=600000000 BOOTRO=0 \
+    bash -c 'echo "1000.50 2000.00" > "$CAMDISPLAY_UPTIME_FILE"; bash "$0"' "$FILES/camdisplay-reboot-count-reset.sh" >/dev/null 2>&1; R_RC=$?
+  chmod 755 "$WORK/boot"
+  check "Zaehler nicht loeschbar bei read-only Boot: Partition wird wieder read-only gesetzt, Exit 1" "ja/nonzero" \
+    "$(grep -q 'remount,ro' "$STUB_LOG" && echo ja || echo nein)/$([ "$R_RC" -ne 0 ] && echo nonzero || echo zero)"
+fi
 STUB_ENTER=600000000 BOOTRO=1 reset 1 1; check "stabil (400 s), Boot beschreibbar: beide Zaehler weg, Exit 0 (oneshot nicht 'failed')" "0/weg/weg" "$R_RC/$R_STATE"
 STUB_ENTER=600000000 BOOTRO=0 reset 1 1; check "stabil, Boot read-only: beide weg, Exit 0" "0/weg/weg" "$R_RC/$R_STATE"
 STUB_ENTER=700500000 BOOTRO=1 reset 1 1; check "genau 300 s stabil: zuruecksetzen" "0/weg/weg" "$R_RC/$R_STATE"

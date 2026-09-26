@@ -91,15 +91,19 @@ save_report() {
 
 # Schreibt den Zaehler und - falls angegeben - den Bericht in EINEM Schreibfenster.
 write_count() { # zaehler [bericht]
-  local was_ro=0
+  local was_ro=0 ok=1
   [ "$(bootro_now)" -eq 0 ] && was_ro=1
   [ "$was_ro" -eq 1 ] && mount -o remount,rw "$BOOT_DIR"
-  echo "$1" > "$COUNT_FILE"
-  if [ -n "${2:-}" ]; then
+  echo "$1" > "$COUNT_FILE" || ok=0
+  if [ "$ok" -eq 1 ] && [ -n "${2:-}" ]; then
     save_report "$2" || true
   fi
+  # Auch nach einem Schreibfehler die Boot-Partition wieder schuetzen, bevor abgebrochen wird
   [ "$was_ro" -eq 1 ] && mount -o remount,ro "$BOOT_DIR"
-  return 0   # verhindert, dass "was_ro=0" (letzte Zeile liefert dann 1) unter set -e den Aufrufer abbricht
+  # Zaehler nicht gespeichert -> Rueckgabe 1 -> "set -e" bricht den Guard ab, OHNE Reboot
+  # (sonst waere eine Reboot-Schleife nicht mehr begrenzt). Das ist gewollt. Sonst 0; die
+  # frueheren Zeilen "[ ... ] && ..." duerfen NICHT die letzte Anweisung sein (set -e-Falle).
+  [ "$ok" -eq 1 ]
 }
 
 # Zaehler lesen. Auf der FAT-Boot-Partition kann ein Stromausfall die Datei
@@ -164,6 +168,8 @@ camera_reachable() {
 # Transiente Timer liegen in /run und funktionieren auch mit Overlay/Bootro.
 schedule_slow_retry() {
   systemctl stop camdisplay-slow-retry.timer camdisplay-slow-retry.service 2>/dev/null || true
+  # Ein gescheiterter transienter Dienst bliebe geladen und blockierte den Namen ("already exists")
+  systemctl reset-failed camdisplay-slow-retry.timer camdisplay-slow-retry.service 2>/dev/null || true
   if ! systemd-run --quiet --unit=camdisplay-slow-retry --on-active="$RETRY_DELAY" \
         --timer-property=AccuracySec=5s \
         /bin/sh -c 'systemctl reset-failed camdisplay.service; systemctl restart camdisplay.service'; then
