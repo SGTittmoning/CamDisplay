@@ -267,7 +267,8 @@ wrap 'rtmp://192.0.2.10:1935/bcs/x.bcs?channel=0&user=admin&password=Fake_TopSec
 check "Wrapper: Exit-Code von ffplay wird durchgereicht" "7" "$W_RC"
 check "Wrapper: Passwort erscheint nirgends in der Ausgabe" "nein" "$(echo "$out" | grep -qE 'TopSecret9|Geh3im|Sup3rSecret|abc123|K3Y' && echo ja || echo nein)"
 check "Wrapper: harmlose Zeilen bleiben erhalten" "ja" "$(echo "$out" | grep -q 'harmlos: user=admin channel=0' && echo ja || echo nein)"
-check "Wrapper: -autoexit/-rw_timeout/+nobuffer gesetzt" "ja" "$(grep ARGV "$WORK/argv.txt" | grep -q '\[-autoexit\].*\[-rw_timeout\] \[5000000\].*\[+nobuffer\]' && echo ja || echo nein)"
+check "Wrapper: -autoexit, -rw_timeout, low_delay, framedrop gesetzt" "ja" "$(grep ARGV "$WORK/argv.txt" | grep -q '\[-autoexit\].*\[-rw_timeout\] \[5000000\].*\[-flags\] \[low_delay\].*\[-framedrop\]' && echo ja || echo nein)"
+check "Wrapper: KEIN fflags nobuffer (stoppt bei RTMP jede Bildausgabe)" "nein" "$(grep -qi 'nobuffer' "$WORK/argv.txt" && echo ja || echo nein)"
 check "Wrapper: kein -timeout, kein -rtsp_transport ohne STREAM_OPTS" "nein" "$(grep ARGV "$WORK/argv.txt" | grep -qE '\[-timeout\]|rtsp_transport' && echo ja || echo nein)"
 check "Wrapper: leere STREAM_OPTS erzeugen kein leeres Argument" "nein" "$(grep ARGV "$WORK/argv.txt" | grep -q '\[\]' && echo ja || echo nein)"
 wrap 'rtsp://cam:p*a?s[s]|w$d@192.0.2.10:554/s' "-rtsp_transport tcp"
@@ -306,6 +307,12 @@ check "Scanner meldet abgesicherte Faelle nicht (Selbsttest)" "0" "$(scan "$WORK
 rc=$(scan "$FILES"/*.sh "$ROOT"/systemd/*.sh)
 check "kein Skript im Repo endet auf die Falle (Details: tests/trap-scan.py)" "0" "$rc"
 [ "$rc" -ne 0 ] && sed 's/^/         /' "$WORK/scan.out"
+
+echo "== Kamera-Werkzeug =="
+wrapper_flags=$(sed -n '/^"\$FFPLAY_BIN"/,/extra_opts/p' "$FILES/camdisplay-run.sh" | grep -vE 'FFPLAY_BIN|extra_opts' | sed 's/\\$//' | tr -s ' \n' ' ' | sed 's/^ //; s/ $//')
+tool_flags=$(sed -n 's/^FFPLAY_FLAGS="\(.*\)"$/\1/p' "$ROOT/tools/check-camera.sh")
+check "tools/check-camera.sh testet mit denselben ffplay-Flags wie camdisplay-run" "$wrapper_flags" "$tool_flags"
+check "die Flags wurden ueberhaupt gefunden (nicht leer)" "ja" "$([ -n "$wrapper_flags" ] && echo ja || echo nein)"
 
 echo "== Beispieldateien systemd/ (werden aus ansible/ erzeugt) =="
 "$ROOT/tools/sync-systemd-examples.sh" "$WORK/generated" > /dev/null
