@@ -32,10 +32,15 @@ is_root() { [ "$(id -u)" -eq 0 ]; }
 
 # ---------------------------------------------------------------- Stubs
 STUBS="$WORK/stubs"; mkdir -p "$STUBS"
-for c in logger reboot systemctl systemd-run apt-get; do
+for c in logger reboot systemctl systemd-run; do
   printf '#!/bin/bash\necho "%s $*" >> "$STUB_LOG"\n' "$c" > "$STUBS/$c"
 done
 printf '#!/bin/bash\necho 0\n' > "$STUBS/id"
+cat > "$STUBS/apt-get" <<'EOF'
+#!/bin/bash
+echo "apt-get $*" >> "$STUB_LOG"
+exit "${FAIL_APT:-0}"
+EOF
 cat > "$STUBS/systemd-run" <<'EOF'
 #!/bin/bash
 echo "systemd-run $*" >> "$STUB_LOG"
@@ -56,6 +61,7 @@ cat > "$STUBS/raspi-config" <<'EOF'
 case "$2" in
   get_bootro_now)  echo "${BOOTRO:-1}" ;;
   get_overlay_now) echo "${OVERLAY:-1}" ;;
+  *) echo "raspi-config $2" >> "$STUB_LOG" ;;
 esac
 exit 0
 EOF
@@ -191,6 +197,25 @@ check "writable rw, Boot beschreibbar: Exit 0, Abschlussmeldung vorhanden" "0/ja
 new_env; echo x > "$WORK/boot/.camdisplay-writable.state"; OVERLAY=1 BOOTRO=0 FAIL_MOUNT_RW=1 maint writable rw
 check "writable rw, remount rw scheitert: Abbruch" "nonzero" "$([ "$M_RC" -ne 0 ] && echo nonzero || echo zero)"
 
+# apply bricht ab (z.B. apt ohne Netz): der geschuetzte Zustand muss wiederhergestellt werden
+apply_case() { # BOOTRO-Ausgangszustand ; Umgebung: FAIL_APT
+  new_env; echo awaiting-apply-no-reboot > "$WORK/boot/.camdisplay-update.state"; OVERLAY=1 BOOTRO=$1 maint update apply
+  A_ENABLED="$(grep -o 'raspi-config enable_[a-z]*' "$STUB_LOG" | sed 's/raspi-config //' | paste -sd,)"
+  A_STATE="$([ -f "$WORK/boot/.camdisplay-update.state" ] && echo da || echo weg)"
+  A_MSG="$(grep -q 'Update-Lauf ist abgebrochen' "$WORK/out.txt" && echo ja || echo nein)"
+}
+FAIL_APT=100 apply_case 0
+check "update apply, apt scheitert (Boot-RO war aktiv): Abbruch, Boot-RO + Overlay wiederhergestellt, Zyklus beendet, laute Meldung" \
+  "nonzero/enable_bootro,enable_overlayfs/weg/ja" "$([ "$M_RC" -ne 0 ] && echo nonzero || echo zero)/$A_ENABLED/$A_STATE/$A_MSG"
+FAIL_APT=100 apply_case 1
+check "update apply, apt scheitert (Boot-RO war inaktiv): nur Overlay wiederhergestellt" "nonzero/enable_overlayfs/weg/ja" \
+  "$([ "$M_RC" -ne 0 ] && echo nonzero || echo zero)/$A_ENABLED/$A_STATE/$A_MSG"
+apply_case 0
+check "update apply erfolgreich: Schutz genau einmal wieder ein, keine Fehlermeldung" "0/enable_bootro,enable_overlayfs/weg/nein" "$M_RC/$A_ENABLED/$A_STATE/$A_MSG"
+new_env; OVERLAY=1 BOOTRO=0 maint update apply
+check "update apply ohne laufenden Zyklus: Ablehnung OHNE Wiederherstellungs-Aktion" "nonzero/-/nein" \
+  "$([ "$M_RC" -ne 0 ] && echo nonzero || echo zero)/$(grep -o 'raspi-config enable_[a-z]*' "$STUB_LOG" | paste -sd, | sed 's/^$/-/')/$(grep -q 'abgebrochen' "$WORK/out.txt" && echo ja || echo nein)"
+
 echo "== Start-Wrapper camdisplay-run =="
 cat > "$WORK/fake_ffplay" <<'EOF'
 #!/bin/bash
@@ -250,17 +275,17 @@ rc=$(scan "$FILES"/*.sh "$ROOT"/systemd/*.sh)
 check "kein Skript im Repo endet auf die Falle (Details: tests/trap-scan.py)" "0" "$rc"
 [ "$rc" -ne 0 ] && sed 's/^/         /' "$WORK/scan.out"
 
-echo "== Spiegel systemd/ <-> ansible/ =="
-for f in "$FILES"/*.sh; do
+echo "== Beispieldateien systemd/ (werden aus ansible/ erzeugt) =="
+"$ROOT/tools/sync-systemd-examples.sh" "$WORK/generated" > /dev/null
+for f in "$WORK"/generated/*; do
   b=$(basename "$f")
-  check "systemd/$b identisch mit ansible/files/$b" "gleich" "$(cmp -s "$f" "$ROOT/systemd/$b" && echo gleich || echo ABWEICHUNG)"
+  check "systemd/$b entspricht dem erzeugten Stand (sonst: tools/sync-systemd-examples.sh)" "gleich" \
+    "$(cmp -s "$f" "$ROOT/systemd/$b" && echo gleich || echo ABWEICHUNG)"
 done
-check "camdisplay.service: nur die User=-Zeile weicht vom Template ab" "User=camdisplay|User={{ camdisplay_service_user }}" \
-  "$(diff "$ROOT/systemd/camdisplay.service" "$ROOT/ansible/templates/camdisplay.service.j2" | grep '^[<>]' | sed 's/^[<>] //' | paste -sd'|')"
-for u in camdisplay-reboot.service camdisplay-reboot-count-reset.service camdisplay-reboot-count-reset.timer; do
-  check "$u: Einstellungen wie im Template (Description darf abweichen)" "gleich" \
-    "$(diff <(grep -v '^Description=' "$ROOT/systemd/$u") <(grep -v '^Description=' "$ROOT/ansible/templates/$u.j2") >/dev/null && echo gleich || echo ABWEICHUNG)"
-done
+check "in den erzeugten Units bleibt keine Jinja-Variable uebrig" "0" "$(grep -l '{{' "$WORK"/generated/*.service "$WORK"/generated/*.timer 2>/dev/null | wc -l | tr -d ' ')"
+extra=""
+for f in "$ROOT"/systemd/*; do [ -e "$WORK/generated/$(basename "$f")" ] || extra="$extra $(basename "$f")"; done
+check "systemd/ enthaelt nur erzeugte Dateien" "" "${extra# }"
 
 echo
 echo "Ergebnis: $pass ok, $fail Fehler, $skipped uebersprungen"
