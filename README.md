@@ -17,7 +17,7 @@ Two setups are documented here:
 
 The [`ansible/`](ansible/) directory has a complete, tested install/maintenance playbook for Setup A (systemd + KMS/DRM), including:
 
-- `install.yml` — fresh install: packages, the systemd units below, and (optionally) a read-only root filesystem for power-loss resilience
+- `install.yml` — fresh install: base system (locale, time zone, hostname, unprivileged service user, saved Wi-Fi profiles removed), packages, the systemd units below, the hardware watchdog, and optionally OS hardening (firewall, SSH) and a read-only root filesystem for power-loss resilience
 - `maintain.yml` — safely applies OS updates even with a read-only root filesystem active
 - `/root/bin/camdisplay-writable.sh` / `camdisplay-update.sh` — manual maintenance scripts for when Ansible access isn't available
 
@@ -30,7 +30,7 @@ ansible-playbook -i inventory.yml install.yml --limit <host>
 ansible-playbook -i inventory.yml install.yml --limit <host> -e camdisplay_enable_overlay=true
 ```
 
-See [`ansible/README.md`](ansible/README.md) for details. The rest of this document explains the underlying setup manually, for anyone not using Ansible.
+Afterwards, [`tools/verify-install.sh`](tools/verify-install.sh) on the device checks the result (see [Verifying an installation](#verifying-an-installation)). See [`ansible/README.md`](ansible/README.md) for details. The rest of this document explains the underlying setup manually, for anyone not using Ansible.
 
 ---
 
@@ -141,6 +141,8 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now camdisplay.service camdisplay-reboot-count-reset.timer
 ```
 
+Optional, but recommended: the maintenance scripts for a read-only root filesystem (see [Storage hardening](#storage-hardening-optional)) and the hardware watchdog (see [Hardware watchdog](#hardware-watchdog) for the drop-in). The Ansible playbook additionally sets locale, time zone and hostname, removes saved Wi-Fi profiles, and can apply the [OS hardening](#os-hardening-optional) — the latter is only automated, its sources are [`ansible/files/nftables.conf`](ansible/files/nftables.conf) and [`ansible/templates/sshd-hardening.conf.j2`](ansible/templates/sshd-hardening.conf.j2) if you want to apply it by hand.
+
 Example files for the above are in [`systemd/`](systemd/) and [`stream.env.example`](stream.env.example). The files in `systemd/` are generated from the Ansible sources by [`tools/sync-systemd-examples.sh`](tools/sync-systemd-examples.sh) — edit `ansible/`, then re-run the script (CI fails if they drift apart).
 
 ### Credentials
@@ -168,7 +170,14 @@ With both active, nothing on disk changes at runtime — updates need a small da
 
 ### Hardware watchdog
 
-The Ansible playbook enables systemd's hardware watchdog by default (`RuntimeWatchdogSec=10` in a `system.conf.d` drop-in, plus `RebootWatchdogSec=2min` so a hung shutdown ends in a hard reset). systemd keeps feeding the SoC's watchdog; if the whole system hangs (kernel panic, blocked PID 1, I/O stall) the feeding stops and the hardware reboots the device — even when no process is responsive any more. The Raspberry Pi watchdog (`bcm2835-wdt`) accepts at most about 15 seconds, which is why the value is validated to 2–15 s. Nothing is set if `/dev/watchdog` doesn't exist. It does **not** catch a hung `ffplay` on an otherwise healthy system — that is what `-autoexit`/`-rw_timeout` and the reboot guard are for. Turn it off with `-e camdisplay_enable_watchdog=false`; manual setup is a two-line drop-in (`[Manager]` / `RuntimeWatchdogSec=10`, then `systemctl daemon-reexec`).
+The Ansible playbook enables systemd's hardware watchdog by default (`RuntimeWatchdogSec=10` in a `system.conf.d` drop-in, plus `RebootWatchdogSec=2min` so a hung shutdown ends in a hard reset). systemd keeps feeding the SoC's watchdog; if the whole system hangs (kernel panic, blocked PID 1, I/O stall) the feeding stops and the hardware reboots the device — even when no process is responsive any more. The Raspberry Pi watchdog (`bcm2835-wdt`) accepts at most about 15 seconds, which is why the value is validated to 2–15 s. Nothing is set if `/dev/watchdog` doesn't exist. It does **not** catch a hung `ffplay` on an otherwise healthy system — that is what `-autoexit`/`-rw_timeout` and the reboot guard are for. Turn it off with `-e camdisplay_enable_watchdog=false`; manual setup:
+
+```bash
+sudo mkdir -p /etc/systemd/system.conf.d
+printf '[Manager]\nRuntimeWatchdogSec=10\nRebootWatchdogSec=2min\n' | sudo tee /etc/systemd/system.conf.d/10-camdisplay-watchdog.conf
+sudo systemctl daemon-reexec
+systemctl show -p RuntimeWatchdogUSec   # expect 10s
+```
 
 ### OS hardening (optional)
 
@@ -179,6 +188,26 @@ Off by default; enable with `-e camdisplay_enable_hardening=true` (Ansible, see 
 - **SSH**: no root login, no X11 forwarding, dead sessions dropped after ~10 minutes, and **key-only login** (password and keyboard-interactive off).
 
 Being locked out is the risk, so the playbook guards against it: password login is only switched off if the Ansible user actually has an `authorized_keys` entry and Ansible connects by key; the SSH settings go into a drop-in named `00-…` (sshd takes the *first* value per keyword, so it also beats later drop-ins such as the ones the Raspberry Pi Imager writes), and afterwards the *effective* configuration is read back with `sshd -T` — if a value didn't take effect, the drop-in is removed again and the run fails before sshd ever loads it. Try it on a test device first. Needs OpenSSH ≥ 8.7 (Bookworm or newer) for the password part; on older systems use `-e camdisplay_ssh_disable_password_auth=false`.
+
+### Verifying an installation
+
+Two read-only helper scripts (neither changes anything, neither prints credentials):
+
+- [`tools/verify-install.sh`](tools/verify-install.sh) — run **on the device** (as root for the complete check) after an install: `sudo tools/verify-install.sh [--expect-hardening] [--expect-overlay] [--no-watchdog]`. Checks the service user (no login shell, no sudo), files and modes, the unit as the service user, that `ffplay` really runs as that user, that a monitor is connected, the reboot counters, camera reachability, that no credentials are in the journal or the failure log, read-only state, watchdog, firewall/SSH values, NTP and power/temperature. Prints `PASS`/`FAIL`/`WARN`/`INFO`/`SKIP` per check and exits 1 on any `FAIL`.
+- [`tools/check-camera.sh`](tools/check-camera.sh) — run **from any machine that can reach the camera** (e.g. a Mac over VPN; bash 3.2 compatible, needs `ffmpeg`): `STREAM_URL=... tools/check-camera.sh` (or `--env-file`, or it asks with a hidden prompt — never as an argument). Reports TCP reachability, codec/size, whether `-analyzeduration 1` finds the same streams as the default analysis, whether frames decode and whether `ffplay` with the wrapper's exact flags actually renders (the position must advance). Use it before rolling out to a new camera.
+
+### Tests
+
+No hardware needed; the scripts run against stubbed system commands and temporary directories and never change the real system:
+
+| Command | What it covers |
+|---|---|
+| `tests/run-tests.sh` | Reboot guard, counter reset, update/writable scripts, wrapper, `set -e` trap scan, generated `systemd/` files in sync |
+| `tests/test-verify.sh` | `verify-install.sh` against a fake device: a healthy one, then many ways of breaking it, each of which must be reported |
+| `tests/test-ansible.sh` | Firewall syntax (`nft -c`), effective `sshd` values, lock-out safeguards, watchdog task (needs `ansible-core`, `nft`, `sshd`) |
+| `tests/test-camera-tool.sh` | `check-camera.sh` against a local RTMP test stream (needs `ffmpeg`; not part of CI) |
+
+CI (GitHub Actions, free for public repositories) runs `shellcheck`, the first three test scripts, `ansible-lint` with a syntax check, and a secret scan on every push.
 
 ---
 

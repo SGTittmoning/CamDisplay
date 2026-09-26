@@ -94,12 +94,16 @@ The script auto-detects both things that are easy to get wrong doing this by han
 
 Note that `camdisplay.service` itself picks its output connector the same way, but only *at startup* — moving the monitor cable to the other HDMI port while it's already running doesn't retarget the running `ffplay`; `systemctl restart camdisplay.service` (or a reboot) is needed to pick up the change.
 
+## Verifying the result
+
+On the device, after `install.yml`: `sudo tools/verify-install.sh` (add `--expect-hardening` / `--expect-overlay` if you enabled those). It is read-only and reports `PASS`/`FAIL`/`WARN` per check; see the [top-level README](../README.md#verifying-an-installation). To check the camera itself from a machine that can reach it, use `tools/check-camera.sh`.
+
 ## Layout
 
 | Path | Purpose |
 |---|---|
 | `install.yml` / `maintain.yml` | Entry-point playbooks |
-| `tasks/base.yml` | Packages, groups, timezone, WiFi removal/disable |
+| `tasks/base.yml` | Locale, time zone, hostname, service user, packages, saved Wi-Fi profiles removed |
 | `tasks/maintenance_scripts.yml` | Deploys the `/root/bin/` scripts |
 | `tasks/watchdog.yml` | Hardware watchdog via systemd (on by default) |
 | `tasks/hardening.yml` | Optional OS hardening: firewall, avahi/Bluetooth off, SSH (see above) |
