@@ -130,14 +130,25 @@
 # Vorher: evtl. beim Imaging (z.B. Raspberry Pi Imager) versehentlich
 # mitgegebene WLAN-Zugangsdaten entfernen - liegen sonst im Klartext in
 # /etc/netplan/*.yaml.
-- name: Vorhandene WLAN-Verbindungsprofile ermitteln
-  command: nmcli -t -f NAME,TYPE connection show
+# Profile ueber die UUID ansprechen, nicht ueber den Namen: Namen koennen
+# Leerzeichen ("Preconfigured WiFi") oder Doppelpunkte enthalten, die nmcli im
+# -t-Format als "\:" maskiert - ein einfaches split(':') und ein ungequotetes
+# "nmcli connection delete <name>" wuerden daran scheitern. UUID und Typ
+# enthalten keine Doppelpunkte.
+- name: Vorhandene WLAN-Verbindungsprofile ermitteln (UUID und Typ)
+  command: nmcli -t -f UUID,TYPE connection show
   register: camdisplay_nm_connections
   changed_when: false
 
 - name: WLAN-Verbindungsprofile (samt Zugangsdaten) entfernen
-  command: "nmcli connection delete {{ item.split(':')[0] }}"
-  loop: "{{ camdisplay_nm_connections.stdout_lines | select('search', ':802-11-wireless') | list }}"
+  command:
+    argv:
+      - nmcli
+      - connection
+      - delete
+      - uuid
+      - "{{ item.split(':')[0] }}"
+  loop: "{{ camdisplay_nm_connections.stdout_lines | select('search', ':(802-11-wireless|wifi)$') | list }}"
 
 - name: WLAN deaktivieren (dtoverlay, wirkt erst nach Reboot)
   lineinfile:
