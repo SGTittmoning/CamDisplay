@@ -65,6 +65,8 @@ SupplementaryGroups=video render
 Environment=SDL_VIDEODRIVER=kmsdrm
 EnvironmentFile=/etc/camdisplay/stream.env
 ExecStart=/usr/local/bin/camdisplay-run
+# ffplay exits with status 0 even when it cannot connect - keep Restart=always
+# (Restart=on-failure would never restart it).
 Restart=always
 RestartSec=10
 
@@ -78,6 +80,7 @@ WantedBy=multi-user.target
 |---|---|
 | `-autoexit` | Exit when the stream ends. Without it `ffplay` stays open on the last frame, so neither `Restart=always` nor the reboot guard ever fires and the display just freezes. |
 | `-rw_timeout 5000000` | Socket I/O timeout in µs: exit if the connection hangs without a clean end (camera or switch gone). Measured with ffmpeg 6.1: `ffplay` exits after roughly 3× this value (~15 s). **Don't use `-timeout` instead** — for RTMP that option means "wait for an *incoming* connection" and turns `ffplay` into a server. |
+| `-fs` | Fullscreen. |
 | `-flags low_delay -framedrop` | Low-latency decoding; drop frames rather than fall behind. |
 | `-analyzeduration 1` | Minimal stream analysis at startup. |
 | `-an -nostats -loglevel error` | No audio, quiet output. |
@@ -90,7 +93,7 @@ WantedBy=multi-user.target
 
 ```ini
 [Unit]
-Description=Reboot after repeated CamDisplay failures (with a total-attempts cap)
+Description=Handle repeated CamDisplay failures (camera-aware reboot with a total cap)
 
 [Service]
 Type=oneshot
@@ -100,7 +103,7 @@ ExecStart=/root/bin/camdisplay-reboot-guard.sh
 Plain `ExecStart=/sbin/reboot` would work but is a poor watchdog: it reboots forever on a *persistent* failure, and it reboots immediately when the camera is merely unreachable, which is usually over in a few minutes and would burn through any reboot budget. [`camdisplay-reboot-guard.sh`](systemd/camdisplay-reboot-guard.sh) decides instead:
 
 - **Camera not reachable** (TCP probe to the host/port from `STREAM_URL`): be patient first — no reboot, nothing written to the boot partition, the service is started again after 2 minutes. A camera restart, firmware update or switch reboot is usually over by then.
-- **Still unreachable after 3 attempts in a row** (≈ 9 minutes; the attempt counter lives in `/run` and starts over after every boot): reboot anyway. Waiting doesn't fix problems on the Pi's side (lost DHCP lease, hung network stack, changed infrastructure); a reboot rebuilds all of that.
+- **Still unreachable after 3 attempts in a row** (roughly 6–10 minutes, depending on how fast `ffplay` fails; the attempt counter lives in `/run` and starts over after every boot): reboot anyway. Waiting doesn't fix problems on the Pi's side (lost DHCP lease, hung network stack, changed infrastructure); a reboot rebuilds all of that.
 - **Camera reachable but `ffplay` keeps failing**: reboot right away.
 - **Reboot limit reached** (5 in total, shared by the two rules above): no further reboot — this stops a reboot loop on a persistent fault and limits writes to the boot partition — but also not switched off for good: the same slow retry every 2 minutes, so the display comes back once the cause is gone.
 
@@ -286,7 +289,7 @@ Unlike Setup A this has no cap on the number of reboots. `ffplay` writes the ful
 | `STREAM_OPTS`  | Optional extra `ffplay` options (e.g. `-rtsp_transport tcp` for RTSP) |
 | `MAX_ERRORS` / `StartLimitBurst` | Consecutive failures within `StartLimitIntervalSec` before the device reboots |
 | `MAX_REBOOTS` (in `camdisplay-reboot-guard.sh`) | Total reboots (default 5); afterwards only slow retries, no more reboots |
-| `UNREACHABLE_ATTEMPTS` (in `camdisplay-reboot-guard.sh`) | Failed start bursts with the camera unreachable (default 3, ≈ 9 min) before rebooting anyway |
+| `UNREACHABLE_ATTEMPTS` (in `camdisplay-reboot-guard.sh`) | Failed start bursts with the camera unreachable (default 3, roughly 6–10 min) before rebooting anyway |
 | `LOG_LINES` / `LOG_MAX_BYTES` (in `camdisplay-reboot-guard.sh`) | Journal lines saved per reboot (60) and size cap of `camdisplay-failure-log.txt` (32 KiB) |
 | `RETRY_DELAY` (in `camdisplay-reboot-guard.sh`) | Seconds (default 120) between restart attempts without a reboot |
 | `ffplay` flags | See the table under [Setup A → Files](#files) (set in `camdisplay-run.sh`) |
