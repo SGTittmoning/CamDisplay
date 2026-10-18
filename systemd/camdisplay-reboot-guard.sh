@@ -59,7 +59,7 @@ LOG_MAX_BYTES="${CAMDISPLAY_LOG_MAX_BYTES:-32768}"       # Obergrenze der Datei 
 # auf die Boot-Partition, faellt beim Reboot von selbst weg)
 UNREACHABLE_FILE="$RUN_DIR/camdisplay-unreachable-count"
 MAX_REBOOTS=5
-UNREACHABLE_ATTEMPTS=3   # Fehlversuche bei unerreichbarer Kamera bis zum Reboot (je ca. 3 min)
+UNREACHABLE_ATTEMPTS=3   # Fehlversuche bei unerreichbarer Kamera bis zum Reboot (je ca. 2-4 min: Startversuche + RETRY_DELAY)
 RETRY_DELAY=120          # Sekunden bis zum naechsten Startversuch ohne Reboot
 PROBE_TIMEOUT=3     # Sekunden fuer die TCP-Erreichbarkeitspruefung
 
