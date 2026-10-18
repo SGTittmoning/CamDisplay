@@ -169,6 +169,9 @@ echo "== ohne root, Optionen =="
 build; STUB_UID=1000 VERIFY_ASSUME_ROOT=0 run --expect-hardening
 check "ohne root: root-Pruefungen werden uebersprungen (SKIP), kein Absturz" "ja/ja" "$(has SKIP 'Wartungsskripte')/$(has SKIP 'Firewall und wirksame SSH')"
 build; run --help;                                             check "--help: Exit 0 und Aufrufhilfe" "0/ja" "$V_RC/$(grep -q 'expect-hardening' "$WORK/out.txt" && echo ja || echo nein)"
+build; run --help;                                             check "--help: gibt keinen Skriptcode aus" "nein" "$(grep -qE '^(set -u|SERVICE_USER=)' "$WORK/out.txt" && echo ja || echo nein)"
+build; SSH_PW=yes run --expect-hardening --allow-password-auth; check "Passwort-Login bewusst an (--allow-password-auth): kein FAIL, Exit 0" "nein/0" "$(has FAIL 'SSH wirksam: passwordauthentication')/$V_RC"
+build; SSH_PW=yes run --expect-hardening --allow-password-auth; check "--allow-password-auth prueft weiter Root-Login und X11" "ja/ja" "$(has PASS 'SSH wirksam: permitrootlogin no')/$(has PASS 'SSH wirksam: x11forwarding no')"
 build; run --unbekannt;                                        check "unbekannte Option: Exit 2" "2" "$V_RC"
 
 echo

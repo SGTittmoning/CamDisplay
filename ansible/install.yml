@@ -37,6 +37,23 @@
           - stream_url is defined
         fail_msg: "Bitte stream_url in der Inventory oder per -e setzen"
 
+    # stream.env wird von systemd (EnvironmentFile) gelesen: in doppelten Anfuehrungszeichen
+    # beendet ein " den Wert und ein \ leitet eine Escape-Folge ein - die URL kaeme verfaelscht
+    # an. Lieber frueh abbrechen als eine kaputte URL zu deployen.
+    - name: stream_url und Stream-Optionen duerfen kein Anfuehrungszeichen und keinen Backslash enthalten
+      assert:
+        that:
+          - "'\"' not in stream_url"
+          - "'\\\\' not in stream_url"
+          - "'\"' not in (camdisplay_stream_opts | default(''))"
+          - "'\\\\' not in (camdisplay_stream_opts | default(''))"
+        fail_msg: >-
+          stream_url (oder camdisplay_stream_opts) enthaelt ein Anfuehrungszeichen oder einen
+          Backslash. systemd wuerde stream.env anders lesen als geschrieben. Betroffene Zeichen
+          im Passwort bitte durch ein anderes Passwort (oder die URL-kodierte Form, falls die
+          Kamera sie akzeptiert) ersetzen.
+        quiet: true
+
     # Sicherheitscheck: alle folgenden Tasks schreiben Dateien (Pakete,
     # /root/bin/*, systemd units, ...). Ist das Root-Overlay auf diesem Host
     # bereits aktiv, landen diese Schreibvorgaenge NUR im fluechtigen

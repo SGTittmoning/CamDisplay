@@ -28,6 +28,8 @@ camdisplay:
 
 `ansible_user` needs passwordless `sudo` on the target. It's only used for the Ansible connection/deployment — `camdisplay.service` itself runs as a separate, unprivileged system user (`camdisplay_service_user`, default `camdisplay`; override via `-e` or an inventory var), created automatically with no login shell and no sudo. Keeping these separate matters: `ansible_user` typically has broad sudo access, and `ffplay` is the one component here that continuously parses network-supplied video — it shouldn't run as an account that could escalate to root if it were ever compromised.
 
+`stream_url` and `camdisplay_stream_opts` must not contain `"` or `\`: `stream.env` is read by systemd, where they would change the value, so `install.yml` stops with an error instead of deploying a corrupted URL.
+
 `camdisplay_stream_opts` (optional) is written to `stream.env` as `STREAM_OPTS` and appended to the `ffplay` command line. It is not set by default because `ffplay` aborts on options the input doesn't know — `-rtsp_transport tcp` breaks an RTMP URL (`Option rtsp_transport not found`). See the [top-level README](../README.md#files) for the flags the wrapper uses and why.
 
 `camdisplay_hostname` (optional) sets the OS hostname via the `hostname` module and reboots if it changed. It does **not** configure DHCP reservations or DNS itself — that's your router/DHCP server's job, keyed by MAC address — but many setups create a DNS record from the hostname a device reports over DHCP, so this is what makes e.g. `camdisplay1.your-domain.lan` resolve. Chicken-and-egg note: on a completely fresh install, that DNS name won't resolve yet (the Pi hasn't reported its new hostname over DHCP), so use the reserved IP directly for `ansible_host` on the very first run; once the hostname is set and the Pi has rebooted, the DNS name should work for subsequent runs (e.g. `maintain.yml`).
@@ -74,7 +76,7 @@ If a host already has the overlay active and you need to add `bootro` afterwards
 ansible-playbook -i inventory.yml maintain.yml --limit <host>
 ```
 
-Applies OS updates. Safe with a read-only root filesystem active — drives the same overlay/bootro-aware sequence as `camdisplay-update.sh` (temporarily lift read-only, `apt full-upgrade`, restore, reboot) rather than a plain `apt upgrade`, which would silently do nothing useful under an active overlay. If a step fails, the script puts the read-only protection back and ends the update cycle, so the play fails with a loud message but the device is not left writable; re-run `maintain.yml` to start over.
+Applies OS updates. Safe with a read-only root filesystem active — drives the same overlay/bootro-aware sequence as `camdisplay-update.sh` (temporarily lift read-only, `apt full-upgrade`, restore, reboot) rather than a plain `apt upgrade`, which would silently do nothing useful under an active overlay. If a step fails, the script re-arms the read-only protection (boot partition immediately, overlay from the next boot) and ends the update cycle, so the play fails with a loud message. The overlay only takes effect after a reboot, which the play does not trigger on failure: until someone reboots the host, its root filesystem stays writable. Reboot it, then re-run `maintain.yml` to start over.
 
 ## Verifying the display headlessly (screenshot)
 

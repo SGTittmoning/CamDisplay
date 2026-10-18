@@ -324,6 +324,17 @@ rc=$(scan "$FILES"/*.sh "$ROOT"/systemd/*.sh)
 check "kein Skript im Repo endet auf die Falle (Details: tests/trap-scan.py)" "0" "$rc"
 [ "$rc" -ne 0 ] && sed 's/^/         /' "$WORK/scan.out"
 
+echo "== Screenshot-Skript =="
+SHOT_DIR="$WORK/shot"; mkdir -p "$SHOT_DIR/drm/card1-HDMI-A-1" "$SHOT_DIR/bin"
+echo connected > "$SHOT_DIR/drm/card1-HDMI-A-1/status"
+printf '#!/bin/bash\necho "ffmpeg ohne Formatangabe" >&2\n' > "$SHOT_DIR/bin/ffmpeg"; chmod +x "$SHOT_DIR/bin/ffmpeg"
+shot() { PATH="$SHOT_DIR/bin:$STUBS:$PATH" CAMDISPLAY_DRM_SYS="$SHOT_DIR/drm" bash "$FILES/camdisplay-screenshot.sh" "$SHOT_DIR/out.png" > "$SHOT_DIR/out.txt" 2>&1; echo $?; }
+check "kein Pixelformat erkennbar: Exit 1 mit Meldung statt stillem Abbruch" "1/ja" "$(shot)/$(grep -q 'Konnte Pixelformat nicht ermitteln' "$SHOT_DIR/out.txt" && echo ja || echo nein)"
+printf '#!/bin/bash\necho "Format is bgra" >&2\necho "Format is bgra" >&2\n' > "$SHOT_DIR/bin/ffmpeg"
+check "Pixelformat erkannt: Exit 0 und Zielpfad auf stdout" "0/$SHOT_DIR/out.png" "$(shot)/$(tail -n 1 "$SHOT_DIR/out.txt")"
+rm -rf "$SHOT_DIR/drm/card1-HDMI-A-1"
+check "kein verbundener Connector: Exit 1 mit Meldung" "1/ja" "$(shot)/$(grep -q 'Kein verbundener DRM-Connector' "$SHOT_DIR/out.txt" && echo ja || echo nein)"
+
 echo "== Kamera-Werkzeug =="
 wrapper_flags=$(sed -n '/^"\$FFPLAY_BIN"/,/extra_opts/p' "$FILES/camdisplay-run.sh" | grep -vE 'FFPLAY_BIN|extra_opts' | sed 's/\\$//' | tr -s ' \n' ' ' | sed 's/^ //; s/ $//')
 tool_flags=$(sed -n 's/^FFPLAY_FLAGS="\(.*\)"$/\1/p' "$ROOT/tools/check-camera.sh")

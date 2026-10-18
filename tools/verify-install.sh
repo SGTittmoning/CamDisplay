@@ -10,6 +10,8 @@
 #                        (sonst nur Information)
 #   --expect-overlay     Read-only-Root (Overlay) und Boot-RO MUESSEN aktiv sein
 #   --no-watchdog        Hardware-Watchdog wurde bewusst abgeschaltet
+#   --allow-password-auth  Passwort-Login per SSH bewusst nicht abgeschaltet
+#                        (camdisplay_ssh_disable_password_auth=false)
 #   --service-user NAME  Service-User (Standard: camdisplay)
 #   -h, --help
 #
@@ -26,14 +28,16 @@ SERVICE_USER=camdisplay
 EXPECT_HARDENING=0
 EXPECT_OVERLAY=0
 EXPECT_WATCHDOG=1
+ALLOW_PASSWORD_AUTH=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --expect-hardening) EXPECT_HARDENING=1 ;;
     --expect-overlay)   EXPECT_OVERLAY=1 ;;
     --no-watchdog)      EXPECT_WATCHDOG=0 ;;
+    --allow-password-auth) ALLOW_PASSWORD_AUTH=1 ;;
     --service-user)     shift; SERVICE_USER="${1:-camdisplay}" ;;
-    -h|--help)          sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help)          sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "Unbekannte Option: $1 (siehe --help)" >&2; exit 2 ;;
   esac
   shift
@@ -253,7 +257,10 @@ if is_root; then
   else res SKIP "Firewall" "nft fehlt"; fi
   if have sshd; then
     eff=$(sshd -T 2>/dev/null)
-    for kv in "permitrootlogin no" "x11forwarding no" "passwordauthentication no" "kbdinteractiveauthentication no"; do
+    ssh_keys="permitrootlogin no|x11forwarding no"
+    [ "$ALLOW_PASSWORD_AUTH" -eq 1 ] || ssh_keys="$ssh_keys|passwordauthentication no|kbdinteractiveauthentication no"
+    IFS='|' read -r -a ssh_expected <<< "$ssh_keys"
+    for kv in "${ssh_expected[@]}"; do
       expect "$EXPECT_HARDENING" "$(printf '%s\n' "$eff" | grep -qx "$kv" && echo 0 || echo 1)" "SSH wirksam: $kv" "gesetzt" "anders (sshd -T)"
     done
   else res SKIP "SSH-Werte" "sshd fehlt"; fi

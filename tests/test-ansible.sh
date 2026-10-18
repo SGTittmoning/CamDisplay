@@ -192,6 +192,16 @@ check "Ansible-User normal -> weiter"        "0"       "$(play "$WORK/rootcheck_
 check "ansible_user nicht gesetzt -> weiter" "0"       "$(play "$WORK/rootcheck_pb.yml")"
 check "Firewall laesst MLD-Abfragen durch (Syntax bleibt gueltig, s.o.)" "ja" "$(grep -q 'mld-listener-query' "$A/files/nftables.conf" && echo ja || echo nein)"
 
+echo "== stream_url: Zeichen, die systemd in stream.env anders liest =="
+awk '/^    - name: stream_url und Stream-Optionen/ {p=1; sub(/^    /, "")} p && /^    # Sicherheitscheck/ {exit} p {sub(/^    /, ""); print}' "$A/install.yml" > "$WORK/urlcheck_tasks.yml"
+printf -- '- hosts: localhost\n  connection: local\n  gather_facts: no\n  tasks:\n    - import_tasks: %s\n' "$WORK/urlcheck_tasks.yml" > "$WORK/urlcheck_pb.yml"
+check "die Pruefung wurde im Playbook gefunden" "ja" "$([ -s "$WORK/urlcheck_tasks.yml" ] && echo ja || echo nein)"
+check "normale URL -> weiter"                "0"       "$(play "$WORK/urlcheck_pb.yml" -e 'stream_url=rtsp://u:pw@h:554/s?a=1&b=2')"
+check "URL mit Anfuehrungszeichen -> Abbruch" "nonzero" "$([ "$(play "$WORK/urlcheck_pb.yml" -e 'stream_url=rtsp://u:p"w@h/s')" -ne 0 ] && echo nonzero || echo zero)"
+check "URL mit Backslash -> Abbruch"          "nonzero" "$([ "$(play "$WORK/urlcheck_pb.yml" -e 'stream_url=rtsp://u:p\\w@h/s')" -ne 0 ] && echo nonzero || echo zero)"
+check "Stream-Optionen mit Anfuehrungszeichen -> Abbruch" "nonzero" "$([ "$(play "$WORK/urlcheck_pb.yml" -e 'stream_url=rtsp://h/s' -e '{"camdisplay_stream_opts": "-x \"y\""}')" -ne 0 ] && echo nonzero || echo zero)"
+check "Stream-Optionen normal -> weiter"      "0"       "$(play "$WORK/urlcheck_pb.yml" -e 'stream_url=rtsp://h/s' -e 'camdisplay_stream_opts=-rtsp_transport tcp')"
+
 echo "== Vorrang: Inventar-Werte muessen die Standardwerte ueberstimmen =="
 # Play-"vars:" haetten Vorrang vor Inventar-Variablen; die Standardwerte stehen deshalb in
 # group_vars/all.yml. Getestet wird mit einem Mini-Playbook im selben Aufbau (Playbook +

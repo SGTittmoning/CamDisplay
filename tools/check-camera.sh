@@ -4,7 +4,8 @@
 # Wrappers (camdisplay-run) zur echten Kamera passen, und beantwortet, ob die
 # schnelle Stream-Analyse (-analyzeduration 1) den Stream richtig erkennt.
 #
-# Voraussetzung: ffmpeg, ffprobe (und optional ffplay) im PATH
+# Voraussetzung: ffmpeg, ffprobe (und optional ffplay) im PATH; perl ist optional
+# (harte Zeitlimits und TCP-Test; ohne perl gilt bashs /dev/tcp ohne Zeitlimit)
 #   macOS:  brew install ffmpeg        Debian/Ubuntu: apt install ffmpeg
 #
 # Die URL enthaelt Zugangsdaten - deshalb NICHT als Argument (landet in der
@@ -104,8 +105,17 @@ esac
 # ----------------------------------------------------------------- TCP-Erreichbarkeit
 echo
 echo "== Erreichbarkeit =="
-if [ -n "$port" ] && command -v perl >/dev/null 2>&1 && \
-   perl -MIO::Socket::INET -e 'IO::Socket::INET->new(PeerAddr=>$ARGV[0],PeerPort=>$ARGV[1],Timeout=>4) or exit 1' "$host" "$port" 2>/dev/null; then
+# perl mit Zeitlimit, sonst bashs /dev/tcp (auch in bash 3.2), mit timeout falls vorhanden
+tcp_ok() { # host port
+  if command -v perl >/dev/null 2>&1; then
+    perl -MIO::Socket::INET -e 'IO::Socket::INET->new(PeerAddr=>$ARGV[0],PeerPort=>$ARGV[1],Timeout=>4) or exit 1' "$1" "$2" 2>/dev/null
+  elif command -v timeout >/dev/null 2>&1; then
+    timeout 4 bash -c 'exec 3<>"/dev/tcp/$0/$1"' "$1" "$2" 2>/dev/null
+  else
+    bash -c 'exec 3<>"/dev/tcp/$0/$1"' "$1" "$2" 2>/dev/null
+  fi
+}
+if [ -n "$port" ] && tcp_ok "$host" "$port"; then
   pass "TCP-Verbindung zu $host:$port moeglich"
 else
   fail "TCP-Verbindung zu $host:$port nicht moeglich (VPN aktiv? Kamera an?)"
@@ -138,7 +148,7 @@ printf '%s\n' "$std" | while IFS= read -r l; do info "Stream: $l"; done
 norm() { printf '%s\n' "$1" | sed -E 's/\|?r_frame_rate=[^|]*//'; }
 if [ $rc_std -eq 0 ] && [ $rc_fast -eq 0 ]; then
   if [ "$(norm "$std")" = "$(norm "$fast")" ]; then
-    pass "Beide Analysen liefern identische Stream-Parameter (O4: -analyzeduration 1 ist unkritisch)"
+    pass "Beide Analysen liefern identische Stream-Parameter (-analyzeduration 1 ist unkritisch)"
     [ "$std" = "$fast" ] || info "nur die geschaetzte r_frame_rate weicht ab (Standard vs. schnell) - ohne Belang fuer die Wiedergabe"
   else
     warn "Die schnelle Analyse erkennt den Stream ANDERS als die Standard-Analyse:"
