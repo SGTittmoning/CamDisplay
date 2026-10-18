@@ -16,6 +16,24 @@ permissions:
   contents: read
 
 jobs:
+  actionlint:
+    if: github.event.repository.private == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      # Lints the workflow files themselves (syntax, bad expression/context
+      # references, unknown action inputs).
+      - name: actionlint
+        env:
+          ACTIONLINT_VERSION: "1.7.12"
+          ACTIONLINT_SHA256: "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"
+        run: |
+          curl -sSfL --retry 5 --retry-delay 3 --retry-all-errors -o actionlint.tgz "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          echo "${ACTIONLINT_SHA256}  actionlint.tgz" | sha256sum -c -
+          tar xzf actionlint.tgz actionlint
+          ./actionlint
+
   shellcheck:
     if: github.event.repository.private == false
     runs-on: ubuntu-latest
@@ -80,3 +98,18 @@ jobs:
           echo "${GITLEAKS_SHA256}  gitleaks.tgz" | sha256sum -c -
           tar xzf gitleaks.tgz gitleaks
           ./gitleaks detect --source . --redact --no-banner --exit-code 1
+
+  codeql:
+    if: github.event.repository.private == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v7
+      # "actions" scans the workflow files; "python" covers tests/trap-scan.py.
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: actions,python
+      - uses: github/codeql-action/analyze@v4
