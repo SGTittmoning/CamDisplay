@@ -108,7 +108,7 @@ Before every reboot the guard saves the reason and the last 60 lines of the serv
 
 If the target can't be derived from the URL (e.g. `udp://`), the probe is skipped and the third rule applies. [`camdisplay-reboot-count-reset.timer`](systemd/camdisplay-reboot-count-reset.timer) checks every 5 minutes and clears the counters once `camdisplay.service` has been running without interruption for at least 5 minutes. Both scripts work whether or not the boot partition is mounted read-only (see [Storage hardening](#storage-hardening-optional) below), and they abort without rebooting if the reboot counter can't be persisted (e.g. a failed remount) rather than risk an uncapped reboot loop. The counter file is read defensively, since a power cut can leave a corrupt file on the FAT boot partition.
 
-`/etc/camdisplay/stream.env` (mode `600` — keep this out of version control, it holds credentials):
+`/etc/camdisplay/stream.env` (mode `600` — keep this out of version control, it holds credentials; systemd reads the value in double quotes, so the URL must not contain `"` or `\`, and the Ansible playbook refuses such a URL):
 
 ```bash
 STREAM_URL="rtsp://user:pass@camera-host:554/stream"
@@ -166,7 +166,7 @@ sudo reboot
 
 `enable_bootro` must run *before* `enable_overlayfs` — `raspi-config` refuses to touch `/etc/fstab` while the root overlay is already live (editing it would only land in the volatile overlay and vanish on reboot). The Ansible playbook (`camdisplay_enable_overlay=true`) does this in the right order automatically.
 
-With both active, nothing on disk changes at runtime — updates need a small dance to temporarily lift the read-only state, apply them, and lock it back down. [`camdisplay-writable.sh`](systemd/camdisplay-writable.sh) (manual config edits) and [`camdisplay-update.sh`](systemd/camdisplay-update.sh) (apt upgrades) handle that; drop them in `/root/bin/` for when Ansible access isn't available. Their state files deliberately live on the boot partition (never covered by the root overlay) so they survive the reboot in the middle of the process. If an upgrade fails halfway (e.g. no network), `camdisplay-update.sh` restores the protected state (boot partition read-only + overlay) and ends the cycle instead of leaving the device silently writable; start over with `begin`.
+With both active, nothing on disk changes at runtime — updates need a small dance to temporarily lift the read-only state, apply them, and lock it back down. [`camdisplay-writable.sh`](systemd/camdisplay-writable.sh) (manual config edits) and [`camdisplay-update.sh`](systemd/camdisplay-update.sh) (apt upgrades) handle that; drop them in `/root/bin/` for when Ansible access isn't available. Their state files deliberately live on the boot partition (never covered by the root overlay) so they survive the reboot in the middle of the process. If an upgrade fails halfway (e.g. no network), `camdisplay-update.sh` re-arms the protection (boot partition read-only right away, overlay from the next boot) and ends the cycle instead of leaving the device silently writable; start over with `begin`. The overlay is a boot-time mechanism, so until the device is rebooted the root filesystem stays writable — the script asks for that reboot, and `maintain.yml` does not do it after a failed run.
 
 ### Hardware watchdog
 
@@ -193,8 +193,8 @@ Being locked out is the risk, so the playbook guards against it: it refuses to r
 
 Two read-only helper scripts (neither changes anything, neither prints credentials):
 
-- [`tools/verify-install.sh`](tools/verify-install.sh) — run **on the device** (as root for the complete check) after an install: `sudo tools/verify-install.sh [--expect-hardening] [--expect-overlay] [--no-watchdog]`. Checks the service user (no login shell, no sudo), files and modes, the unit as the service user, that `ffplay` really runs as that user, that a monitor is connected, the reboot counters, camera reachability, that no credentials are in the journal or the failure log, read-only state, watchdog, firewall/SSH values, NTP and power/temperature. Prints `PASS`/`FAIL`/`WARN`/`INFO`/`SKIP` per check and exits 1 on any `FAIL`.
-- [`tools/check-camera.sh`](tools/check-camera.sh) — run **from any machine that can reach the camera** (e.g. a Mac over VPN; bash 3.2 compatible, needs `ffmpeg`): `STREAM_URL=... tools/check-camera.sh` (or `--env-file`, or it asks with a hidden prompt — never as an argument). Reports TCP reachability, codec/size, whether `-analyzeduration 1` finds the same streams as the default analysis, whether frames decode and whether `ffplay` with the wrapper's exact flags actually renders (the position must advance). Use it before rolling out to a new camera.
+- [`tools/verify-install.sh`](tools/verify-install.sh) — run **on the device** (as root for the complete check) after an install: `sudo tools/verify-install.sh [--expect-hardening] [--expect-overlay] [--no-watchdog] [--allow-password-auth] [--service-user NAME]` (`--allow-password-auth` for installs with `camdisplay_ssh_disable_password_auth=false`). Checks the service user (no login shell, no sudo), files and modes, the unit as the service user, that `ffplay` really runs as that user, that a monitor is connected, the reboot counters, camera reachability, that no credentials are in the journal or the failure log, read-only state, watchdog, firewall/SSH values, NTP and power/temperature. Prints `PASS`/`FAIL`/`WARN`/`INFO`/`SKIP` per check and exits 1 on any `FAIL`.
+- [`tools/check-camera.sh`](tools/check-camera.sh) — run **from any machine that can reach the camera** (e.g. a Mac over VPN; bash 3.2 compatible, needs `ffmpeg`; `perl`, if present, adds hard time limits): `STREAM_URL=... tools/check-camera.sh` (or `--env-file`, or it asks with a hidden prompt — never as an argument). Reports TCP reachability, codec/size, whether `-analyzeduration 1` finds the same streams as the default analysis, whether frames decode and whether `ffplay` with the wrapper's exact flags actually renders (the position must advance). Use it before rolling out to a new camera.
 
 ### Tests
 
@@ -202,7 +202,7 @@ No hardware needed; the scripts run against stubbed system commands and temporar
 
 | Command | What it covers |
 |---|---|
-| `tests/run-tests.sh` | Reboot guard, counter reset, update/writable scripts, wrapper, `set -e` trap scan, generated `systemd/` files in sync |
+| `tests/run-tests.sh` | Reboot guard, counter reset, update/writable/screenshot scripts, wrapper, `set -e` trap scan, generated `systemd/` files in sync |
 | `tests/test-verify.sh` | `verify-install.sh` against a fake device: a healthy one, then many ways of breaking it, each of which must be reported |
 | `tests/test-ansible.sh` | Firewall syntax (`nft -c`), effective `sshd` values, lock-out safeguards, watchdog task (needs `ansible-core`, `nft`, `sshd`) |
 | `tests/test-camera-tool.sh` | `check-camera.sh` against a local RTMP test stream (needs `ffmpeg`; not part of CI) |
